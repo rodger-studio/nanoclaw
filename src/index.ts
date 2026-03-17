@@ -33,6 +33,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getChatName,
   getRegisteredGroup,
   getRouterState,
   initDatabase,
@@ -180,7 +181,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(
+    missedMessages,
+    TIMEZONE,
+    getChatName(chatJid) || group.name,
+  );
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -418,7 +423,11 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formatted = formatMessages(
+            messagesToSend,
+            TIMEZONE,
+            getChatName(chatJid) || group.name,
+          );
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(

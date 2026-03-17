@@ -240,6 +240,13 @@ export function updateChatName(chatJid: string, name: string): void {
   ).run(chatJid, name, new Date().toISOString());
 }
 
+export function getChatName(chatJid: string): string | undefined {
+  const row = db
+    .prepare('SELECT name FROM chats WHERE jid = ?')
+    .get(chatJid) as { name: string } | undefined;
+  return row?.name;
+}
+
 export interface ChatInfo {
   jid: string;
   name: string;

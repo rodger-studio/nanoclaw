@@ -13,13 +13,17 @@ export function escapeXml(s: string): string {
 export function formatMessages(
   messages: NewMessage[],
   timezone: string,
+  channelName?: string,
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+  const channelAttr = channelName
+    ? ` channel="${escapeXml(channelName)}"`
+    : '';
+  const header = `<context timezone="${escapeXml(timezone)}"${channelAttr} />\n`;
 
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
