@@ -100,26 +100,28 @@ export class SlackChannel implements Channel {
         const isDM = msg.channel_type === 'im';
         if (!isBotMentioned && !isDM) return;
 
-        // Resolve name for the folder — channel name for groups, user name for DMs
+        // All Slack channels share the main group's folder so they have
+        // unified memory, sessions, and project access — one agent brain.
+        const mainGroup = Object.values(this.opts.registeredGroups()).find(
+          (g) => g.isMain,
+        );
+        const mainFolder = mainGroup?.folder || 'slack_main';
         const displayName = isDM
-          ? (msg.user ? await this.resolveUserName(msg.user) : undefined)
+          ? msg.user
+            ? await this.resolveUserName(msg.user)
+            : undefined
           : await this.resolveChannelName(msg.channel);
-        const safeName = (displayName || msg.channel)
-          .toLowerCase()
-          .replace(/[^a-z0-9-]/g, '-')
-          .replace(/-+/g, '-')
-          .slice(0, 50);
-        const folder = isDM ? `slack_dm-${safeName}` : `slack_${safeName}`;
 
         this.opts.registerGroup(jid, {
           name: displayName || msg.channel,
-          folder,
+          folder: mainFolder,
           trigger: `@${ASSISTANT_NAME}`,
           added_at: new Date().toISOString(),
           requiresTrigger: isDM ? false : true,
+          isMain: true,
         });
         logger.info(
-          { jid, name: displayName, folder, isDM },
+          { jid, name: displayName, folder: mainFolder, isDM },
           'Auto-registered Slack channel on @mention',
         );
       }
