@@ -12,6 +12,8 @@ services:
       - ./groups:/app/groups
       - ./store:/app/store
       - ./container:/app/container
+      # .env file — app reads it directly via readEnvFile() for secrets
+      - ./.env:/app/.env:ro
       # Security config (mount/sender allowlists) — stored outside project root
       - ~/.config/nanoclaw:/root/.config/nanoclaw:ro
     env_file:
