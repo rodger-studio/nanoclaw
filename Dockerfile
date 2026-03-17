@@ -1,6 +1,19 @@
 # NanoClaw Host Process
 # Runs the orchestrator that spawns agent containers as siblings via Docker socket
 
+# --- Build stage ---
+FROM node:22-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npx tsc
+
+# --- Production stage ---
 FROM node:22-slim
 
 # Install Docker CLI (needed to spawn sibling agent containers)
@@ -18,16 +31,11 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files first for better caching
 COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts
 
-# Install dependencies
-RUN npm ci --omit=dev
-
-# Copy source and build
-COPY tsconfig.json ./
-COPY src/ ./src/
-RUN npx tsc
+# Copy compiled output from builder
+COPY --from=builder /app/dist ./dist
 
 # Copy container assets (agent-runner, skills, build script, Dockerfile)
 COPY container/ ./container/

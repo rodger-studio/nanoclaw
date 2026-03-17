@@ -1,0 +1,8 @@
+node_modules
+dist
+data
+groups
+store
+.env
+.git
+*.db
