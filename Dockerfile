@@ -4,10 +4,12 @@
 # --- Build stage ---
 FROM node:22-slim AS builder
 
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+RUN HUSKY=0 npm ci
 
 COPY tsconfig.json ./
 COPY src/ ./src/
@@ -16,11 +18,14 @@ RUN npx tsc
 # --- Production stage ---
 FROM node:22-slim
 
-# Install Docker CLI (needed to spawn sibling agent containers)
+# Install Docker CLI and build tools for native modules (better-sqlite3)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     gnupg \
+    python3 \
+    make \
+    g++ \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
@@ -32,7 +37,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
+# HUSKY=0 skips the husky prepare hook while allowing native module compilation
+RUN HUSKY=0 npm ci --omit=dev
 
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
