@@ -144,6 +144,14 @@ export class SlackChannel implements Channel {
         );
       }
 
+      // Self-heal: DMs should never require a trigger (you can't @mention in a DM).
+      // Fix if the group was registered via IPC or other path that didn't set this.
+      if (msg.channel_type === 'im' && groups[baseJid]?.requiresTrigger !== false) {
+        groups[baseJid].requiresTrigger = false;
+        this.opts.registerGroup(baseJid, groups[baseJid]); // persist fix to DB
+        logger.info({ jid: baseJid }, 'Self-healed DM requiresTrigger to false');
+      }
+
       // Auto-register thread JIDs in memory when the base channel is registered.
       // Threads inherit the parent channel's config but don't require a trigger.
       if (threadTs && !groups[jid] && groups[baseJid]) {

@@ -488,6 +488,73 @@ describe('SlackChannel', () => {
     });
   });
 
+  // --- DM self-healing ---
+
+  describe('DM requiresTrigger self-healing', () => {
+    it('auto-corrects requiresTrigger to false for DMs', async () => {
+      const groups: Record<string, any> = {
+        'slack:D0ALFNK5BV5': {
+          name: 'Guillaume',
+          folder: 'slack_main',
+          trigger: '@Jonesy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: true, // misconfigured — DMs can't @mention
+          isMain: true,
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        channel: 'D0ALFNK5BV5',
+        channelType: 'im',
+        text: 'Hello',
+      });
+      await triggerMessageEvent(event);
+
+      // Should have persisted the fix
+      expect(opts.registerGroup).toHaveBeenCalledWith(
+        'slack:D0ALFNK5BV5',
+        expect.objectContaining({ requiresTrigger: false }),
+      );
+      // Message should still be delivered
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:D0ALFNK5BV5',
+        expect.objectContaining({ content: 'Hello' }),
+      );
+    });
+
+    it('does not self-heal DMs that already have requiresTrigger false', async () => {
+      const groups: Record<string, any> = {
+        'slack:D0123456789': {
+          name: 'DM User',
+          folder: 'slack_main',
+          trigger: '@Jonesy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        channel: 'D0123456789',
+        channelType: 'im',
+        text: 'Hello',
+      });
+      await triggerMessageEvent(event);
+
+      // registerGroup should NOT be called (no fix needed)
+      expect(opts.registerGroup).not.toHaveBeenCalled();
+    });
+  });
+
   // --- @mention translation ---
 
   describe('@mention translation', () => {
