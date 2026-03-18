@@ -64,6 +64,32 @@ server.tool(
 );
 
 server.tool(
+  'list_channels',
+  'List channels and DMs you can send messages to via send_message with target_jid. Use this to discover JIDs when the user asks to send a message somewhere else.',
+  {},
+  async () => {
+    const channelsFile = path.join(IPC_DIR, 'targetable_channels.json');
+    try {
+      if (!fs.existsSync(channelsFile)) {
+        return { content: [{ type: 'text' as const, text: 'No targetable channels found.' }] };
+      }
+      const channels = JSON.parse(fs.readFileSync(channelsFile, 'utf-8'));
+      if (channels.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No other channels available to target.' }] };
+      }
+      const formatted = channels
+        .map((c: { jid: string; name: string }) => `- ${c.name}: ${c.jid}`)
+        .join('\n');
+      return { content: [{ type: 'text' as const, text: `Available channels:\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading channels: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

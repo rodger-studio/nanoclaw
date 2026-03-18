@@ -19,6 +19,7 @@ import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
+  writeTargetableChannels,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
@@ -316,6 +317,9 @@ async function runAgent(
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
+
+  // Write targetable channels so agent knows which JIDs it can send to
+  writeTargetableChannels(chatJid, isMain, group.folder, registeredGroups);
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput

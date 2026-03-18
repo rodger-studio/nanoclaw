@@ -757,3 +757,34 @@ export function writeGroupsSnapshot(
     ),
   );
 }
+
+export interface TargetableChannel {
+  jid: string;
+  name: string;
+}
+
+/**
+ * Write targetable channels list for the container's send_message tool.
+ * Main group can target any registered JID.
+ * Non-main groups can target JIDs sharing the same folder.
+ */
+export function writeTargetableChannels(
+  chatJid: string,
+  isMain: boolean,
+  sourceFolder: string,
+  registeredGroups: Record<string, { name: string; folder: string }>,
+): void {
+  const groupIpcDir = resolveChannelIpcPath(chatJid);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const channels: TargetableChannel[] = [];
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (jid === chatJid) continue; // Exclude current channel
+    if (isMain || group.folder === sourceFolder) {
+      channels.push({ jid, name: group.name });
+    }
+  }
+
+  const channelsFile = path.join(groupIpcDir, 'targetable_channels.json');
+  fs.writeFileSync(channelsFile, JSON.stringify(channels, null, 2));
+}
