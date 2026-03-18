@@ -20,9 +20,7 @@ export function formatMessages(
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  const channelAttr = channelName
-    ? ` channel="${escapeXml(channelName)}"`
-    : '';
+  const channelAttr = channelName ? ` channel="${escapeXml(channelName)}"` : '';
   const header = `<context timezone="${escapeXml(timezone)}"${channelAttr} />\n`;
 
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;

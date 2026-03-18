@@ -74,6 +74,17 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+/**
+ * Resolve a group by JID, falling back to the base channel JID for thread JIDs.
+ * Thread JIDs (slack:C123:thread:1234.5678) inherit their parent channel's registration.
+ */
+function resolveGroup(chatJid: string): RegisteredGroup | undefined {
+  const direct = registeredGroups[chatJid];
+  if (direct) return direct;
+  const baseJid = chatJid.replace(/:thread:.*$/, '');
+  return baseJid !== chatJid ? registeredGroups[baseJid] : undefined;
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -150,7 +161,7 @@ export function _setRegisteredGroups(
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  const group = resolveGroup(chatJid);
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
@@ -389,7 +400,7 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
+          const group = resolveGroup(chatJid);
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
@@ -559,7 +570,7 @@ async function main(): Promise<void> {
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
-      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+      if (!msg.is_from_me && !msg.is_bot_message && resolveGroup(chatJid)) {
         const cfg = loadSenderAllowlist();
         if (
           shouldDropMessage(chatJid, cfg) &&

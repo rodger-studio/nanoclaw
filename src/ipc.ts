@@ -80,7 +80,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
+                // Fall back to base channel JID for thread JIDs
+                const targetGroup =
+                  registeredGroups[data.chatJid] ||
+                  (() => {
+                    const baseJid = data.chatJid!.replace(/:thread:.*$/, '');
+                    return baseJid !== data.chatJid
+                      ? registeredGroups[baseJid]
+                      : undefined;
+                  })();
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)

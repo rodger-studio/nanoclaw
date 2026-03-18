@@ -114,8 +114,12 @@ async function runTask(
   // channels share the same folder (e.g. Slack channels) — the folder
   // search returns whichever group was inserted first, which may have
   // different isMain/containerConfig than the task's actual channel.
+  // Look up by JID first, then try base channel JID for thread JIDs,
+  // then fall back to folder-based lookup.
+  const baseJid = task.chat_jid.replace(/:thread:.*$/, '');
   const group =
     groups[task.chat_jid] ||
+    (baseJid !== task.chat_jid ? groups[baseJid] : undefined) ||
     Object.values(groups).find((g) => g.folder === task.group_folder);
 
   if (!group) {

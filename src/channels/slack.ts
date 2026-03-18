@@ -17,6 +17,16 @@ import {
 // Messages exceeding this are split into sequential chunks.
 const MAX_MESSAGE_LENGTH = 4000;
 
+/** Parse a Slack JID into channelId and optional threadTs. */
+function parseSlackJid(jid: string): { channelId: string; threadTs?: string } {
+  const stripped = jid.replace(/^slack:/, '');
+  const threadMatch = stripped.match(/^(.+?):thread:(.+)$/);
+  if (threadMatch) {
+    return { channelId: threadMatch[1], threadTs: threadMatch[2] };
+  }
+  return { channelId: stripped };
+}
+
 // The message subtypes we process. Bolt delivers all subtypes via app.event('message');
 // we filter to regular messages (GenericMessageEvent, subtype undefined) and bot messages
 // (BotMessageEvent, subtype 'bot_message') so we can track our own output.
@@ -81,21 +91,24 @@ export class SlackChannel implements Channel {
 
       if (!msg.text) return;
 
-      // Threaded replies are flattened into the channel conversation.
-      // The agent sees them alongside channel-level messages; responses
-      // always go to the channel, not back into the thread.
+      // Determine JID: thread replies get their own isolated JID so they
+      // have separate context and the agent replies in the thread.
+      const threadTs = (msg as GenericMessageEvent).thread_ts;
+      const baseJid = `slack:${msg.channel}`;
+      const jid = threadTs
+        ? `slack:${msg.channel}:thread:${threadTs}`
+        : baseJid;
 
-      const jid = `slack:${msg.channel}`;
       const timestamp = new Date(parseFloat(msg.ts) * 1000).toISOString();
       const isGroup = msg.channel_type !== 'im';
 
-      // Always report metadata for group discovery
-      this.opts.onChatMetadata(jid, timestamp, undefined, 'slack', isGroup);
+      // Always report metadata using the base channel JID (threads don't need chat discovery)
+      this.opts.onChatMetadata(baseJid, timestamp, undefined, 'slack', isGroup);
 
       // Auto-register channels when bot is @mentioned in an unregistered channel.
       // This lets the bot grow with the Slack workspace — just invite it and @mention.
       const groups = this.opts.registeredGroups();
-      if (!groups[jid]) {
+      if (!groups[baseJid]) {
         const isBotMentioned =
           this.botUserId && msg.text?.includes(`<@${this.botUserId}>`);
         const isDM = msg.channel_type === 'im';
@@ -113,7 +126,7 @@ export class SlackChannel implements Channel {
             : undefined
           : await this.resolveChannelName(msg.channel);
 
-        this.opts.registerGroup(jid, {
+        this.opts.registerGroup(baseJid, {
           name: displayName || msg.channel,
           folder: mainFolder,
           trigger: `@${ASSISTANT_NAME}`,
@@ -122,8 +135,23 @@ export class SlackChannel implements Channel {
           isMain: true,
         });
         logger.info(
-          { jid, name: displayName, folder: mainFolder, isDM },
+          { jid: baseJid, name: displayName, folder: mainFolder, isDM },
           'Auto-registered Slack channel on @mention',
+        );
+      }
+
+      // Auto-register thread JIDs in memory when the base channel is registered.
+      // Threads inherit the parent channel's config but don't require a trigger.
+      if (threadTs && !groups[jid] && groups[baseJid]) {
+        const parent = groups[baseJid];
+        // In-memory only — threads are ephemeral, no DB persistence
+        groups[jid] = {
+          ...parent,
+          requiresTrigger: false,
+        };
+        logger.debug(
+          { jid, baseJid },
+          'Auto-registered Slack thread (in-memory)',
         );
       }
 
@@ -195,7 +223,7 @@ export class SlackChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const channelId = jid.replace(/^slack:/, '');
+    const { channelId, threadTs } = parseSlackJid(jid);
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
@@ -207,13 +235,19 @@ export class SlackChannel implements Channel {
     }
 
     try {
+      const baseOpts: { channel: string; text: string; thread_ts?: string } = {
+        channel: channelId,
+        text,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+      };
+
       // Slack limits messages to ~4000 characters; split if needed
       if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.app.client.chat.postMessage({ channel: channelId, text });
+        await this.app.client.chat.postMessage(baseOpts);
       } else {
         for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
           await this.app.client.chat.postMessage({
-            channel: channelId,
+            ...baseOpts,
             text: text.slice(i, i + MAX_MESSAGE_LENGTH),
           });
         }
@@ -246,7 +280,7 @@ export class SlackChannel implements Channel {
    * Adds 👀 when processing starts, removes it when done.
    */
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    const channelId = jid.replace(/^slack:/, '');
+    const { channelId } = parseSlackJid(jid);
     const lastTs = this.lastMessageTs.get(jid);
     if (!lastTs) return;
 
@@ -344,10 +378,11 @@ export class SlackChannel implements Channel {
       );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        const channelId = item.jid.replace(/^slack:/, '');
+        const { channelId, threadTs } = parseSlackJid(item.jid);
         await this.app.client.chat.postMessage({
           channel: channelId,
           text: item.text,
+          ...(threadTs ? { thread_ts: threadTs } : {}),
         });
         logger.info(
           { jid: item.jid, length: item.text.length },

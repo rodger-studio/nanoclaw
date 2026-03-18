@@ -92,7 +92,11 @@ function getEntry(
   chatJid: string,
   cfg: SenderAllowlistConfig,
 ): ChatAllowlistEntry {
-  return cfg.chats[chatJid] ?? cfg.default;
+  if (cfg.chats[chatJid]) return cfg.chats[chatJid];
+  // Fall back to base channel JID for thread JIDs (slack:C123:thread:...)
+  const baseJid = chatJid.replace(/:thread:.*$/, '');
+  if (baseJid !== chatJid && cfg.chats[baseJid]) return cfg.chats[baseJid];
+  return cfg.default;
 }
 
 export function isSenderAllowed(

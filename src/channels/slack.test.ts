@@ -432,7 +432,7 @@ describe('SlackChannel', () => {
       );
     });
 
-    it('flattens threaded replies into channel messages', async () => {
+    it('delivers threaded replies with thread-specific JID', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
       await channel.connect();
@@ -444,16 +444,17 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
-      // Threaded replies are delivered as regular channel messages
+      // Threaded replies get their own JID with thread_ts encoded
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'slack:C0123456789',
+        'slack:C0123456789:thread:1704067200.000000',
         expect.objectContaining({
           content: 'Thread reply',
+          chat_jid: 'slack:C0123456789:thread:1704067200.000000',
         }),
       );
     });
 
-    it('delivers thread parent messages normally', async () => {
+    it('delivers thread parent messages with thread JID', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
       await channel.connect();
@@ -465,10 +466,12 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
+      // Thread parent (ts === thread_ts) still gets thread JID
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'slack:C0123456789',
+        'slack:C0123456789:thread:1704067200.000000',
         expect.objectContaining({
           content: 'Thread parent',
+          chat_jid: 'slack:C0123456789:thread:1704067200.000000',
         }),
       );
     });

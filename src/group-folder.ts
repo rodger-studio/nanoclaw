@@ -48,7 +48,10 @@ export function resolveGroupIpcPath(folder: string): string {
  * e.g. "slack:C0AA9KRGS00" → "slack-C0AA9KRGS00"
  */
 export function sanitizeJidForPath(jid: string): string {
-  return jid.replace(/[^A-Za-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 64);
+  return jid
+    .replace(/[^A-Za-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 64);
 }
 
 /**
