@@ -41,15 +41,16 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Optionally target a different channel/DM by specifying target_jid (use when the user explicitly asks to send somewhere else, e.g. 'send this to my DMs').",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    target_jid: z.string().optional().describe('Target a different channel/DM by JID. Only use when the user explicitly asks to send to another channel. The host will authorize the request.'),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: args.target_jid || chatJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
