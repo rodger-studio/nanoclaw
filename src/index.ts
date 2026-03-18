@@ -37,6 +37,7 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -349,6 +350,16 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Detect stale session: if the error says the session doesn't exist,
+      // clear it so the next retry starts a fresh conversation instead of looping.
+      if (output.error?.includes('No conversation found with session ID')) {
+        logger.warn(
+          { group: group.name, sessionId: sessions[group.folder] },
+          'Stale session detected, clearing for fresh start',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
