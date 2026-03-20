@@ -378,24 +378,31 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  includeBotMessages: boolean = false,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // When includeBotMessages is true (e.g. thread contexts), keep bot messages
+  // so the agent can see the full conversation history.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
+  const botFilter = includeBotMessages
+    ? ''
+    : 'AND is_bot_message = 0 AND content NOT LIKE ?';
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
+        ${botFilter}
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  const params = includeBotMessages
+    ? [chatJid, sinceTimestamp, limit]
+    : [chatJid, sinceTimestamp, `${botPrefix}:%`, limit];
+  return db.prepare(sql).all(...params) as NewMessage[];
 }
 
 export function createTask(

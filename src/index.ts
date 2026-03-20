@@ -175,10 +175,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const isThread = chatJid.includes(':thread:');
   const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
+    200,
+    isThread,
   );
 
   if (missedMessages.length === 0) return true;
@@ -443,10 +446,13 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
+          const isThread = chatJid.includes(':thread:');
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
+            200,
+            isThread,
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
