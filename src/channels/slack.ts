@@ -386,6 +386,75 @@ export class SlackChannel implements Channel {
     }
   }
 
+  /**
+   * Fetch the parent message of a thread via Slack API.
+   * Used when the parent wasn't stored in our DB (e.g. block-only bot messages
+   * with no text field that were filtered out on ingest).
+   */
+  async fetchThreadParent(jid: string): Promise<import('../types.js').NewMessage | undefined> {
+    const { channelId, threadTs } = parseSlackJid(jid);
+    if (!threadTs || !this.connected) return undefined;
+
+    try {
+      const result = await this.app.client.conversations.replies({
+        channel: channelId,
+        ts: threadTs,
+        limit: 1,
+        inclusive: true,
+      });
+      const parent = result.messages?.[0];
+      if (!parent) return undefined;
+
+      // Extract text: prefer text field, fall back to blocks/attachments
+      let content = parent.text || '';
+      if (!content && (parent as Record<string, unknown>).blocks) {
+        const blocks = (parent as Record<string, unknown>).blocks as Array<Record<string, unknown>>;
+        content = blocks
+          .map((b) => {
+            if (b.type === 'section' && b.text && typeof b.text === 'object') {
+              return (b.text as Record<string, string>).text || '';
+            }
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+      if (!content && (parent as Record<string, unknown>).attachments) {
+        const atts = (parent as Record<string, unknown>).attachments as Array<Record<string, string>>;
+        content = atts
+          .map((a) => [a.pretext, a.title, a.text].filter(Boolean).join(' — '))
+          .filter(Boolean)
+          .join('\n');
+      }
+      if (!content) content = '[message with no text content]';
+
+      const isBotMessage = !!(parent as Record<string, unknown>).bot_id;
+      const senderName = isBotMessage
+        ? (parent as Record<string, string>).username || 'bot'
+        : parent.user
+          ? (await this.resolveUserName(parent.user)) || parent.user
+          : 'unknown';
+
+      const timestamp = new Date(
+        parseFloat(parent.ts!) * 1000,
+      ).toISOString();
+
+      return {
+        id: parent.ts!,
+        chat_jid: jid,
+        sender: parent.user || (parent as Record<string, string>).bot_id || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: isBotMessage,
+      };
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to fetch thread parent via API');
+      return undefined;
+    }
+  }
+
   private async flushOutgoingQueue(): Promise<void> {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;

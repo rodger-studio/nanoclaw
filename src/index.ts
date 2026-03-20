@@ -185,11 +185,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     isThread,
   );
 
-  // For threads, prepend the parent message (stored under the channel JID)
-  // so the agent has context about what started the thread.
+  // For threads, prepend the parent message so the agent knows what started
+  // the thread. Try DB first (channel JID), fall back to Slack API for
+  // messages we never stored (e.g. block-only bot messages with no text).
   if (isThread && missedMessages.length > 0) {
-    const parent = getThreadParentMessage(chatJid);
-    if (parent && !missedMessages.some((m) => m.id === parent.id)) {
+    let parent = getThreadParentMessage(chatJid);
+    if (!parent && channel.fetchThreadParent) {
+      parent = await channel.fetchThreadParent(chatJid);
+    }
+    if (parent && !missedMessages.some((m) => m.id === parent!.id)) {
       missedMessages.unshift(parent);
     }
   }
@@ -466,8 +470,11 @@ async function startMessageLoop(): Promise<void> {
           );
           // For threads, prepend the parent message so agent has full context.
           if (isThread && allPending.length > 0) {
-            const parent = getThreadParentMessage(chatJid);
-            if (parent && !allPending.some((m) => m.id === parent.id)) {
+            let parent = getThreadParentMessage(chatJid);
+            if (!parent && channel.fetchThreadParent) {
+              parent = await channel.fetchThreadParent(chatJid);
+            }
+            if (parent && !allPending.some((m) => m.id === parent!.id)) {
               allPending.unshift(parent);
             }
           }

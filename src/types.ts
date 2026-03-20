@@ -90,6 +90,9 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: fetch the parent message of a thread via platform API.
+  // Used when the parent wasn't stored in our DB (e.g. block-only bot messages).
+  fetchThreadParent?(jid: string): Promise<NewMessage | undefined>;
 }
 
 // Callback type that channels use to deliver inbound messages
