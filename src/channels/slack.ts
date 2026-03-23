@@ -165,7 +165,7 @@ export class SlackChannel implements Channel {
         // In-memory only — threads are ephemeral, no DB persistence
         groups[jid] = {
           ...parent,
-          requiresTrigger: true,
+          requiresTrigger: parent.requiresTrigger ?? true,
         };
         logger.debug(
           { jid, baseJid },
@@ -391,7 +391,9 @@ export class SlackChannel implements Channel {
    * Used when the parent wasn't stored in our DB (e.g. block-only bot messages
    * with no text field that were filtered out on ingest).
    */
-  async fetchThreadParent(jid: string): Promise<import('../types.js').NewMessage | undefined> {
+  async fetchThreadParent(
+    jid: string,
+  ): Promise<import('../types.js').NewMessage | undefined> {
     const { channelId, threadTs } = parseSlackJid(jid);
     if (!threadTs || !this.connected) return undefined;
 
@@ -408,7 +410,9 @@ export class SlackChannel implements Channel {
       // Extract text: prefer text field, fall back to blocks/attachments
       let content = parent.text || '';
       if (!content && (parent as Record<string, unknown>).blocks) {
-        const blocks = (parent as Record<string, unknown>).blocks as Array<Record<string, unknown>>;
+        const blocks = (parent as Record<string, unknown>).blocks as Array<
+          Record<string, unknown>
+        >;
         content = blocks
           .map((b) => {
             if (b.type === 'section' && b.text && typeof b.text === 'object') {
@@ -420,7 +424,9 @@ export class SlackChannel implements Channel {
           .join('\n');
       }
       if (!content && (parent as Record<string, unknown>).attachments) {
-        const atts = (parent as Record<string, unknown>).attachments as Array<Record<string, string>>;
+        const atts = (parent as Record<string, unknown>).attachments as Array<
+          Record<string, string>
+        >;
         content = atts
           .map((a) => [a.pretext, a.title, a.text].filter(Boolean).join(' — '))
           .filter(Boolean)
@@ -435,9 +441,7 @@ export class SlackChannel implements Channel {
           ? (await this.resolveUserName(parent.user)) || parent.user
           : 'unknown';
 
-      const timestamp = new Date(
-        parseFloat(parent.ts!) * 1000,
-      ).toISOString();
+      const timestamp = new Date(parseFloat(parent.ts!) * 1000).toISOString();
 
       return {
         id: parent.ts!,
