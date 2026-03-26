@@ -96,7 +96,9 @@ export class SlackChannel implements Channel {
 
       let text = msg.text || '';
       if (!text && files?.length) {
-        text = files.map((f) => `[file: ${f.name || 'attachment'}]`).join(' ');
+        text = files
+          .map((f) => `[file: ${f.name || 'attachment'}]`)
+          .join(' ');
       }
       if (!text) return;
 
@@ -139,14 +141,13 @@ export class SlackChannel implements Channel {
             : undefined
           : await this.resolveChannelName(msg.channel);
 
-        const isFirstGroup = !mainGroup;
         this.opts.registerGroup(baseJid, {
           name: displayName || msg.channel,
           folder: mainFolder,
           trigger: `@${ASSISTANT_NAME}`,
           added_at: new Date().toISOString(),
-          requiresTrigger: isDM || isFirstGroup ? false : true,
-          isMain: isFirstGroup,
+          requiresTrigger: isDM ? false : true,
+          isMain: true,
         });
         logger.info(
           { jid: baseJid, name: displayName, folder: mainFolder, isDM },
