@@ -17,6 +17,64 @@ import {
 // Messages exceeding this are split into sequential chunks.
 const MAX_MESSAGE_LENGTH = 4000;
 
+/**
+ * Extract human-readable text from Slack Block Kit blocks and attachments.
+ *
+ * Many bot messages carry their real content in `blocks` (or legacy
+ * `attachments`) rather than the top-level `text` field — critical data like
+ * "Email: …" often lives in a section field or a context block. Without this,
+ * such messages reach the agent with no content (or get dropped on ingest).
+ */
+function extractBlockText(source: Record<string, unknown>): string {
+  const parts: string[] = [];
+
+  const blocks = source.blocks as Array<Record<string, unknown>> | undefined;
+  for (const b of blocks || []) {
+    const type = b.type;
+
+    // section: main text and/or a `fields` array (two-column key/value layout)
+    if (type === 'section' || type === 'header') {
+      const t = b.text as Record<string, string> | undefined;
+      if (t?.text) parts.push(t.text);
+      const fields = b.fields as Array<Record<string, string>> | undefined;
+      for (const f of fields || []) {
+        if (f?.text) parts.push(f.text);
+      }
+    }
+
+    // context: array of mrkdwn/plain_text (and image) elements
+    if (type === 'context') {
+      const elements = b.elements as Array<Record<string, string>> | undefined;
+      for (const el of elements || []) {
+        if (el?.text) parts.push(el.text);
+      }
+    }
+
+    // rich_text: nested sections of text/link elements
+    if (type === 'rich_text') {
+      const sections = b.elements as Array<Record<string, unknown>> | undefined;
+      for (const sec of sections || []) {
+        const els = sec.elements as Array<Record<string, string>> | undefined;
+        const line = (els || [])
+          .map((e) => e.text || e.url || '')
+          .filter(Boolean)
+          .join('');
+        if (line) parts.push(line);
+      }
+    }
+  }
+
+  const attachments = source.attachments as
+    | Array<Record<string, string>>
+    | undefined;
+  for (const a of attachments || []) {
+    const line = [a.pretext, a.title, a.text].filter(Boolean).join(' — ');
+    if (line) parts.push(line);
+  }
+
+  return parts.filter(Boolean).join('\n');
+}
+
 /** Parse a Slack JID into channelId and optional threadTs. */
 function parseSlackJid(jid: string): { channelId: string; threadTs?: string } {
   const stripped = jid.replace(/^slack:/, '');
@@ -95,10 +153,13 @@ export class SlackChannel implements Channel {
         | undefined;
 
       let text = msg.text || '';
+      // Fall back to Block Kit blocks / attachments when there's no plain text —
+      // bot messages often carry their real content (e.g. an "Email:" field) there.
+      if (!text) {
+        text = extractBlockText(msg as unknown as Record<string, unknown>);
+      }
       if (!text && files?.length) {
-        text = files
-          .map((f) => `[file: ${f.name || 'attachment'}]`)
-          .join(' ');
+        text = files.map((f) => `[file: ${f.name || 'attachment'}]`).join(' ');
       }
       if (!text) return;
 
@@ -420,28 +481,8 @@ export class SlackChannel implements Channel {
 
       // Extract text: prefer text field, fall back to blocks/attachments
       let content = parent.text || '';
-      if (!content && (parent as Record<string, unknown>).blocks) {
-        const blocks = (parent as Record<string, unknown>).blocks as Array<
-          Record<string, unknown>
-        >;
-        content = blocks
-          .map((b) => {
-            if (b.type === 'section' && b.text && typeof b.text === 'object') {
-              return (b.text as Record<string, string>).text || '';
-            }
-            return '';
-          })
-          .filter(Boolean)
-          .join('\n');
-      }
-      if (!content && (parent as Record<string, unknown>).attachments) {
-        const atts = (parent as Record<string, unknown>).attachments as Array<
-          Record<string, string>
-        >;
-        content = atts
-          .map((a) => [a.pretext, a.title, a.text].filter(Boolean).join(' — '))
-          .filter(Boolean)
-          .join('\n');
+      if (!content) {
+        content = extractBlockText(parent as Record<string, unknown>);
       }
       if (!content) content = '[message with no text content]';
 
