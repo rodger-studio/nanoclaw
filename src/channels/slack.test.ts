@@ -116,6 +116,8 @@ function createMessageEvent(overrides: {
   threadTs?: string;
   subtype?: string;
   botId?: string;
+  blocks?: unknown[];
+  attachments?: unknown[];
 }) {
   return {
     channel: overrides.channel ?? 'C0123456789',
@@ -126,6 +128,8 @@ function createMessageEvent(overrides: {
     thread_ts: overrides.threadTs,
     subtype: overrides.subtype,
     bot_id: overrides.botId,
+    blocks: overrides.blocks,
+    attachments: overrides.attachments,
   };
 }
 
@@ -271,6 +275,79 @@ describe('SlackChannel', () => {
       await triggerMessageEvent(event);
 
       expect(opts.onChatMetadata).toHaveBeenCalled();
+    });
+
+    it('reads critical data from a bot message context block (truncated text fallback)', async () => {
+      // Regression: the Clutch feedback bot posts the human-readable body as the
+      // `text` fallback (often truncated) and the user metadata — including the
+      // Email — in a separate `context` block. The old code only read blocks when
+      // `text` was empty, so the email was silently dropped.
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        subtype: 'bot_message',
+        botId: 'B_FEEDBACK',
+        text: ':envelope: Contact — Clutch: Bonjour, je vous recontacte, ', // truncated fallback
+        blocks: [
+          { type: 'header', text: { type: 'plain_text', text: 'Contact — Clutch' } },
+          {
+            type: 'section',
+            text: { type: 'plain_text', text: 'Bonjour, je vous recontacte.' },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '*User:* Leo Menny (`cmrh3c8hx19oe0oo1k8pinf3t`)  |  *Email:* <mailto:mennyleo508@gmail.com|mennyleo508@gmail.com>',
+              },
+            ],
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('mennyleo508@gmail.com'),
+        }),
+      );
+      const delivered = (opts.onMessage as any).mock.calls[0][1].content;
+      expect(delivered).toContain('cmrh3c8hx19oe0oo1k8pinf3t');
+    });
+
+    it('keeps plain text for normal user messages (blocks not preferred)', async () => {
+      // Normal user messages carry their own complete text (with @mention
+      // encoding); we must not swap in mangled rich_text-derived content.
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        text: 'hello <@U_BOT_123> world',
+        blocks: [
+          {
+            type: 'rich_text',
+            elements: [
+              {
+                type: 'rich_text_section',
+                elements: [
+                  { type: 'text', text: 'hello ' },
+                  { type: 'user', user_id: 'U_BOT_123' },
+                  { type: 'text', text: ' world' },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      const delivered = (opts.onMessage as any).mock.calls[0][1].content;
+      expect(delivered).toContain('hello <@U_BOT_123> world');
     });
 
     it('skips messages with no text', async () => {

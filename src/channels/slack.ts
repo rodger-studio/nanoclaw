@@ -50,13 +50,14 @@ function extractBlockText(source: Record<string, unknown>): string {
       }
     }
 
-    // rich_text: nested sections of text/link elements
+    // rich_text: nested sections of text/link/mention elements. Re-encode user
+    // mentions as <@ID> so trigger detection still works when block text is used.
     if (type === 'rich_text') {
       const sections = b.elements as Array<Record<string, unknown>> | undefined;
       for (const sec of sections || []) {
         const els = sec.elements as Array<Record<string, string>> | undefined;
         const line = (els || [])
-          .map((e) => e.text || e.url || '')
+          .map((e) => e.text || e.url || (e.user_id ? `<@${e.user_id}>` : ''))
           .filter(Boolean)
           .join('');
         if (line) parts.push(line);
@@ -153,10 +154,21 @@ export class SlackChannel implements Channel {
         | undefined;
 
       let text = msg.text || '';
-      // Fall back to Block Kit blocks / attachments when there's no plain text —
-      // bot messages often carry their real content (e.g. an "Email:" field) there.
-      if (!text) {
-        text = extractBlockText(msg as unknown as Record<string, unknown>);
+      // For app/bot messages, Block Kit `blocks` are the authoritative content;
+      // the top-level `text` is only a notification fallback that is frequently
+      // truncated and omits `context` blocks entirely — which is exactly where
+      // critical data lives (e.g. an "Email:" / user-id field in a Clutch feedback
+      // message). Prefer the full block/attachment text so it isn't lost. Normal
+      // user messages keep their own `text` (it's complete and preserves @mention
+      // encoding), so we only do this for bot messages.
+      const isBotEvent =
+        !!(msg as unknown as { bot_id?: string }).bot_id ||
+        subtype === 'bot_message';
+      if (isBotEvent) {
+        const blockText = extractBlockText(
+          msg as unknown as Record<string, unknown>,
+        );
+        if (blockText) text = blockText;
       }
       if (!text && files?.length) {
         text = files.map((f) => `[file: ${f.name || 'attachment'}]`).join(' ');
