@@ -347,7 +347,7 @@ describe('SlackChannel', () => {
       await triggerMessageEvent(event);
 
       const delivered = (opts.onMessage as any).mock.calls[0][1].content;
-      expect(delivered).toContain('hello <@U_BOT_123> world');
+      expect(delivered).toContain('hello @Jonesy world');
     });
 
     it('skips messages with no text', async () => {
@@ -649,7 +649,7 @@ describe('SlackChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'slack:C0123456789',
         expect.objectContaining({
-          content: '@Jonesy Hey <@U_BOT_123> what do you think?',
+          content: '@Jonesy Hey @Jonesy what do you think?',
         }),
       );
     });
@@ -665,16 +665,16 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
-      // Content should be unchanged since it already matches TRIGGER_PATTERN
+      // No trigger prepended since it already matches TRIGGER_PATTERN
       expect(opts.onMessage).toHaveBeenCalledWith(
         'slack:C0123456789',
         expect.objectContaining({
-          content: '@Jonesy <@U_BOT_123> hello',
+          content: '@Jonesy @Jonesy hello',
         }),
       );
     });
 
-    it('does not translate mentions in bot messages', async () => {
+    it('does not prepend the trigger to bot messages', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
       await channel.connect();
@@ -686,16 +686,16 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
-      // Bot messages skip mention translation
+      // Bot messages never get the trigger prepended, but IDs are still resolved
       expect(opts.onMessage).toHaveBeenCalledWith(
         'slack:C0123456789',
         expect.objectContaining({
-          content: 'Echo: <@U_BOT_123>',
+          content: 'Echo: @Jonesy',
         }),
       );
     });
 
-    it('does not translate mentions for other users', async () => {
+    it('resolves mentions of other users to their display name', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
       await channel.connect();
@@ -706,13 +706,77 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
-      // Mention is for a different user, not the bot
       expect(opts.onMessage).toHaveBeenCalledWith(
         'slack:C0123456789',
         expect.objectContaining({
-          content: 'Hey <@U_OTHER_USER> look at this',
+          content: 'Hey @Alice Smith look at this',
         }),
       );
+      expect(currentApp().client.users.info).toHaveBeenCalledWith({
+        user: 'U_OTHER_USER',
+      });
+    });
+
+    it('resolves each distinct user ID once per message', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(
+        createMessageEvent({
+          text: '<@U_OTHER_USER> and <@U_OTHER_USER> again',
+          user: 'U_USER_456',
+        }),
+      );
+
+      const delivered = (opts.onMessage as any).mock.calls[0][1].content;
+      expect(delivered).toBe('@Alice Smith and @Alice Smith again');
+      const lookups = currentApp().client.users.info.mock.calls.filter(
+        (c: any[]) => c[0].user === 'U_OTHER_USER',
+      );
+      expect(lookups).toHaveLength(1);
+    });
+
+    it('keeps the raw ID when the user cannot be resolved', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      currentApp().client.users.info.mockImplementation(({ user }: any) =>
+        user === 'U_GHOST'
+          ? Promise.reject(new Error('user_not_found'))
+          : Promise.resolve({ user: { real_name: 'Alice Smith' } }),
+      );
+
+      await triggerMessageEvent(
+        createMessageEvent({
+          text: 'Hey <@U_GHOST> look at this',
+          user: 'U_USER_456',
+        }),
+      );
+
+      const delivered = (opts.onMessage as any).mock.calls[0][1].content;
+      expect(delivered).toBe('Hey <@U_GHOST> look at this');
+    });
+
+    it('resolves inline labels, channels, groups and broadcasts', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(
+        createMessageEvent({
+          text: '<@U_X|damien> ping <!subteam^S_DESIGN|@design> in <#C_GEN|general> <!here>',
+          user: 'U_USER_456',
+        }),
+      );
+
+      const delivered = (opts.onMessage as any).mock.calls[0][1].content;
+      expect(delivered).toBe('@damien ping @design in #general @here');
+      // Labels are already human-readable — no mention lookup needed
+      expect(currentApp().client.users.info).not.toHaveBeenCalledWith({
+        user: 'U_X',
+      });
     });
   });
 

@@ -86,6 +86,11 @@ function parseSlackJid(jid: string): { channelId: string; threadTs?: string } {
   return { channelId: stripped };
 }
 
+// Slack encodes every entity reference as `<prefix + id + optional |label>`:
+//   <@U123>  <@U123|alice>  <#C123|general>  <!here>  <!subteam^S123|@design>
+// Anything the label doesn't cover has to be resolved through the API.
+const SLACK_ENTITY_PATTERN = /<([@#!])([^>|\s]+)(?:\|([^>]*))?>/g;
+
 // The message subtypes we process. Bolt delivers all subtypes via app.event('message');
 // we filter to regular messages (GenericMessageEvent, subtype undefined) and bot messages
 // (BotMessageEvent, subtype 'bot_message') so we can track our own output.
@@ -107,6 +112,7 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
+  private channelNameCache = new Map<string, string>();
   private lastMessageTs = new Map<string, string>();
 
   private opts: SlackChannelOpts;
@@ -269,16 +275,15 @@ export class SlackChannel implements Channel {
           'unknown';
       }
 
-      // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
-      // Slack encodes @mentions as <@U12345>, which won't match TRIGGER_PATTERN
-      // (e.g., ^@<ASSISTANT_NAME>\b), so we prepend the trigger when the bot is @mentioned.
-      let content = text;
+      // Turn `<@U12345>` / `<#C12345>` into readable names before the agent
+      // ever sees them (the bot's own ID becomes `@<ASSISTANT_NAME>`).
+      let content = await this.resolveMentions(text);
+
+      // TRIGGER_PATTERN is anchored (e.g. ^@<ASSISTANT_NAME>\b), so a mid-sentence
+      // mention of the bot still needs the trigger prepended.
       if (this.botUserId && !isBotMessage) {
         const mentionPattern = `<@${this.botUserId}>`;
-        if (
-          content.includes(mentionPattern) &&
-          !TRIGGER_PATTERN.test(content)
-        ) {
+        if (text.includes(mentionPattern) && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
       }
@@ -442,15 +447,85 @@ export class SlackChannel implements Channel {
   private async resolveChannelName(
     channelId: string,
   ): Promise<string | undefined> {
+    const cached = this.channelNameCache.get(channelId);
+    if (cached) return cached;
+
     try {
       const result = await this.app.client.conversations.info({
         channel: channelId,
       });
-      return result.channel?.name;
+      const name = result.channel?.name;
+      if (name) this.channelNameCache.set(channelId, name);
+      return name;
     } catch (err) {
       logger.debug({ channelId, err }, 'Failed to resolve Slack channel name');
       return undefined;
     }
+  }
+
+  /**
+   * Rewrite Slack's raw entity encodings into what a human reads in the app.
+   *
+   * Slack delivers @mentions as `<@U0123ABC>` and channel links as `<#C0123>`.
+   * The agent has no way to map an opaque ID to a person, so it either drops the
+   * reference or invents a name for it. Resolving IDs to display names here —
+   * once, at ingest — means every downstream consumer (agent prompt, stored
+   * history, search) sees "@Damien" instead of "<@U0123ABC>".
+   *
+   * Unresolvable IDs are left untouched rather than blanked, so nothing is
+   * silently lost and trigger detection on the raw text still behaves.
+   */
+  private async resolveMentions(text: string): Promise<string> {
+    if (!text.includes('<')) return text;
+
+    const matches = [...text.matchAll(SLACK_ENTITY_PATTERN)];
+    if (matches.length === 0) return text;
+
+    // Resolve each distinct ID once, in parallel, before rewriting — String.replace
+    // can't await, and a message often mentions the same person several times.
+    const userIds = new Set(
+      matches
+        .filter((m) => m[1] === '@' && !m[3] && m[2] !== this.botUserId)
+        .map((m) => m[2]),
+    );
+    const channelIds = new Set(
+      matches.filter((m) => m[1] === '#' && !m[3]).map((m) => m[2]),
+    );
+
+    await Promise.all([
+      ...[...userIds].map((id) => this.resolveUserName(id)),
+      ...[...channelIds].map((id) => this.resolveChannelName(id)),
+    ]);
+
+    return text.replace(
+      SLACK_ENTITY_PATTERN,
+      (raw: string, prefix: string, body: string, label?: string) => {
+        if (prefix === '@') {
+          // Our own mentions read as the assistant's name, matching how the
+          // trigger is written everywhere else.
+          if (this.botUserId && body === this.botUserId) {
+            return `@${ASSISTANT_NAME}`;
+          }
+          const name = label || this.userNameCache.get(body);
+          return name ? `@${name}` : raw;
+        }
+
+        if (prefix === '#') {
+          const name = label || this.channelNameCache.get(body);
+          return name ? `#${name}` : raw;
+        }
+
+        // `!` covers user groups, broadcasts, and special encodings (dates, etc.)
+        if (body.startsWith('subteam^')) {
+          if (!label) return raw;
+          return label.startsWith('@') ? label : `@${label}`;
+        }
+        if (body === 'here' || body === 'channel' || body === 'everyone') {
+          return `@${body}`;
+        }
+        return label || raw;
+      },
+    );
   }
 
   private async resolveUserName(userId: string): Promise<string | undefined> {
@@ -497,6 +572,7 @@ export class SlackChannel implements Channel {
         content = extractBlockText(parent as Record<string, unknown>);
       }
       if (!content) content = '[message with no text content]';
+      content = await this.resolveMentions(content);
 
       const isBotMessage = !!(parent as Record<string, unknown>).bot_id;
       const senderName = isBotMessage
