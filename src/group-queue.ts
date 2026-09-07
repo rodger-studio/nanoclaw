@@ -26,6 +26,10 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  /** When the container went idle-waiting (ms epoch), for oldest-first eviction. */
+  idleSince: number | null;
+  /** A close sentinel was written; slot is being reclaimed, don't evict twice. */
+  evicting: boolean;
 }
 
 export class GroupQueue {
@@ -50,6 +54,8 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        idleSince: null,
+        evicting: false,
       };
       this.groups.set(groupJid, state);
     }
@@ -80,6 +86,9 @@ export class GroupQueue {
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
+      // Warm containers are a cache, not work — reclaim a slot so this
+      // message isn't stuck behind an idle agent for the whole idle timeout.
+      this.evictIdleForSlot(groupJid);
       return;
     }
 
@@ -121,6 +130,7 @@ export class GroupQueue {
         { groupJid, taskId, activeCount: this.activeCount },
         'At concurrency limit, task queued',
       );
+      this.evictIdleForSlot(groupJid);
       return;
     }
 
@@ -149,6 +159,7 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
+    state.idleSince = Date.now();
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
@@ -163,6 +174,7 @@ export class GroupQueue {
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    state.idleSince = null;
 
     const inputDir = path.join(resolveChannelIpcPath(groupJid), 'input');
     try {
@@ -209,6 +221,8 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
+    state.idleSince = null;
+    state.evicting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
@@ -232,6 +246,9 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
+      state.idleWaiting = false;
+      state.idleSince = null;
+      state.evicting = false;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -244,6 +261,8 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
+    state.idleSince = null;
+    state.evicting = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
     this.activeCount++;
@@ -259,6 +278,9 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+      state.idleWaiting = false;
+      state.idleSince = null;
+      state.evicting = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
       state.process = null;
@@ -322,6 +344,47 @@ export class GroupQueue {
 
     // Nothing pending for this group; check if other groups are waiting for a slot
     this.drainWaiting();
+  }
+
+  /**
+   * Free one concurrency slot by winding down the longest-idle warm container.
+   *
+   * Containers stay alive after finishing work (IDLE_TIMEOUT) so follow-up
+   * messages reuse a warm session, but they keep holding their slot. Without
+   * this, MAX_CONCURRENT_CONTAINERS idle groups deadlock every other group
+   * until the idle timeout expires. Returns true if a container was evicted.
+   */
+  private evictIdleForSlot(requestingJid: string): boolean {
+    let oldestJid: string | null = null;
+    let oldestState: GroupState | null = null;
+
+    for (const [jid, state] of this.groups) {
+      if (jid === requestingJid) continue;
+      if (!state.active || !state.idleWaiting || state.evicting) continue;
+      // Skip groups that already have work queued — they're about to be drained
+      // by their own container, so evicting them would waste the warm session.
+      if (state.pendingMessages || state.pendingTasks.length > 0) continue;
+      if (state.idleSince === null) continue;
+      if (oldestState === null || state.idleSince < oldestState.idleSince!) {
+        oldestJid = jid;
+        oldestState = state;
+      }
+    }
+
+    if (!oldestJid || !oldestState) return false;
+
+    oldestState.evicting = true;
+    this.closeStdin(oldestJid);
+    logger.info(
+      {
+        evictedJid: oldestJid,
+        requestingJid,
+        idleMs: Date.now() - oldestState.idleSince!,
+        activeCount: this.activeCount,
+      },
+      'Evicted idle container to free a concurrency slot',
+    );
+    return true;
   }
 
   private drainWaiting(): void {

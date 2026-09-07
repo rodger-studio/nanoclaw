@@ -481,4 +481,94 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  // --- Cross-group idle eviction ---
+
+  it('evicts the longest-idle container when another group needs a slot', async () => {
+    const fs = await import('fs');
+    const resolvers: Record<string, () => void> = {};
+
+    const processMessages = vi.fn(async (jid: string) => {
+      await new Promise<void>((resolve) => {
+        resolvers[jid] = resolve;
+      });
+      return true;
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots (MAX_CONCURRENT_CONTAINERS = 2)
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'folder-1');
+    queue.registerProcess('group2@g.us', {} as any, 'container-2', 'folder-2');
+
+    // group1 goes idle first, then group2 — group1 is the eviction target
+    queue.notifyIdle('group1@g.us');
+    await vi.advanceTimersByTimeAsync(1000);
+    queue.notifyIdle('group2@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // A third group arrives with no slot available
+    queue.enqueueMessageCheck('group3@g.us');
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+    expect(closeWrites[0][0]).toContain('group1-g-us');
+
+    // Once the evicted container exits, the waiting group runs
+    resolvers['group1@g.us']!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processMessages).toHaveBeenCalledWith('group3@g.us');
+
+    resolvers['group2@g.us']!();
+    resolvers['group3@g.us']?.();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('does not evict twice for repeated messages on the same backlog', async () => {
+    const fs = await import('fs');
+    const resolvers: Record<string, () => void> = {};
+
+    const processMessages = vi.fn(async (jid: string) => {
+      await new Promise<void>((resolve) => {
+        resolvers[jid] = resolve;
+      });
+      return true;
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'folder-1');
+    queue.registerProcess('group2@g.us', {} as any, 'container-2', 'folder-2');
+    queue.notifyIdle('group1@g.us');
+    await vi.advanceTimersByTimeAsync(1000);
+    queue.notifyIdle('group2@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Same waiting group nudged repeatedly: evicts group1, then group2, then stops
+    queue.enqueueMessageCheck('group3@g.us');
+    queue.enqueueMessageCheck('group3@g.us');
+    queue.enqueueMessageCheck('group3@g.us');
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(2);
+
+    resolvers['group1@g.us']!();
+    resolvers['group2@g.us']!();
+    await vi.advanceTimersByTimeAsync(10);
+    resolvers['group3@g.us']?.();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });
