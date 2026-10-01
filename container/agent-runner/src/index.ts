@@ -391,10 +391,9 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  // Sonnet 5 is the current cheap tier ($2/$10 per MTok — cheaper than the
-  // SDK's Sonnet 4.6 default). Override with AGENT_MODEL in .env (forwarded to
-  // agent containers automatically).
-  const model = process.env.AGENT_MODEL || 'claude-sonnet-5';
+  // Default to Opus 5.5 (needs claude-agent-sdk >= 0.3.280). Override with
+  // AGENT_MODEL in .env (forwarded to agent containers automatically).
+  const model = process.env.AGENT_MODEL || 'claude-opus-5-5';
   log(`Model: ${model}`);
 
   for await (const message of query({
