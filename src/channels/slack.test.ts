@@ -9,6 +9,7 @@ vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Jonesy',
   TRIGGER_PATTERN: /^@Jonesy\b/i,
+  USER_REPORTS_CHANNEL_ID: 'C_REPORTS',
 }));
 
 // Mock logger
@@ -291,7 +292,10 @@ describe('SlackChannel', () => {
         botId: 'B_FEEDBACK',
         text: ':envelope: Contact — Clutch: Bonjour, je vous recontacte, ', // truncated fallback
         blocks: [
-          { type: 'header', text: { type: 'plain_text', text: 'Contact — Clutch' } },
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: 'Contact — Clutch' },
+          },
           {
             type: 'section',
             text: { type: 'plain_text', text: 'Bonjour, je vous recontacte.' },
@@ -566,6 +570,140 @@ describe('SlackChannel', () => {
   });
 
   // --- DM self-healing ---
+
+  describe('user-report auto-triage', () => {
+    const reportsGroups = () => ({
+      'slack:C0123456789': {
+        name: 'Test Channel',
+        folder: 'test-channel',
+        trigger: '@Jonesy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+      'slack:C_REPORTS': {
+        name: 'user-reports',
+        folder: 'test-channel',
+        trigger: '@Jonesy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        requiresTrigger: true,
+      },
+    });
+
+    async function setup() {
+      const groups = reportsGroups();
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups) as any,
+      });
+      const channel = new SlackChannel(opts);
+      await channel.connect(); // botUserId = U_BOT_123
+      return { opts, groups };
+    }
+
+    const triageCalls = (opts: SlackChannelOpts) =>
+      (opts.onMessage as any).mock.calls.filter(
+        ([, m]: [string, any]) => m.sender === 'system',
+      );
+
+    it('injects a trigger into the thread of a new bot report', async () => {
+      const { opts, groups } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_FEEDBACK_APP',
+          botId: 'B_FEEDBACK',
+          ts: '1704067200.000100',
+          text: ':envelope: Contact — Clutch: mon compte est suspendu',
+        }),
+      );
+
+      const threadJid = 'slack:C_REPORTS:thread:1704067200.000100';
+      const calls = triageCalls(opts);
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toBe(threadJid);
+      expect(calls[0][1]).toMatchObject({
+        id: '1704067200.000100-autotriage',
+        chat_jid: threadJid,
+        is_from_me: true,
+        is_bot_message: false,
+      });
+      expect(calls[0][1].content).toMatch(/^@Jonesy /);
+      // Thread is registered in memory and has a chats row
+      expect((groups as any)[threadJid]).toBeDefined();
+      expect(opts.onChatMetadata).toHaveBeenCalledWith(
+        threadJid,
+        expect.any(String),
+        undefined,
+        'slack',
+        true,
+      );
+      // Synthetic trigger sorts after the report itself
+      const report = (opts.onMessage as any).mock.calls.find(
+        ([jid]: [string]) => jid === 'slack:C_REPORTS',
+      )[1];
+      expect(calls[0][1].timestamp > report.timestamp).toBe(true);
+    });
+
+    it('also triages subtype bot_message posts', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          subtype: 'bot_message',
+          botId: 'B_DEBATIUM',
+          user: undefined as any,
+          text: ':bulb: Suggestion — Debatium: des jeux',
+        }),
+      );
+      expect(triageCalls(opts)).toHaveLength(1);
+    });
+
+    it('ignores human messages in the reports channel', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({ channel: 'C_REPORTS', text: 'mdr' }),
+      );
+      expect(triageCalls(opts)).toHaveLength(0);
+    });
+
+    it('ignores its own posts', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_BOT_123',
+          botId: 'B_SELF',
+          text: 'User Report Manager du jour',
+        }),
+      );
+      expect(triageCalls(opts)).toHaveLength(0);
+    });
+
+    it('ignores bot replies inside a thread', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_FEEDBACK_APP',
+          botId: 'B_FEEDBACK',
+          ts: '1704067300.000000',
+          threadTs: '1704067200.000100',
+          text: "Réponse envoyée à l'utilisateur",
+        }),
+      );
+      expect(triageCalls(opts)).toHaveLength(0);
+    });
+
+    it('ignores bot posts in other channels', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          user: 'U_FEEDBACK_APP',
+          botId: 'B_FEEDBACK',
+          text: 'some bot post',
+        }),
+      );
+      expect(triageCalls(opts)).toHaveLength(0);
+    });
+  });
 
   describe('DM requiresTrigger self-healing', () => {
     it('auto-corrects requiresTrigger to false for DMs', async () => {

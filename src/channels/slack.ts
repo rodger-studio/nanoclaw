@@ -1,10 +1,15 @@
 import { App, LogLevel } from '@slack/bolt';
 import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  TRIGGER_PATTERN,
+  USER_REPORTS_CHANNEL_ID,
+} from '../config.js';
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { isUserReport, USER_REPORT_PROMPT } from '../user-reports.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -303,6 +308,52 @@ export class SlackChannel implements Channel {
         is_from_me: isBotMessage,
         is_bot_message: isBotMessage,
       });
+
+      // Auto-triage: a new bot report in the user-reports channel gets a
+      // synthetic trigger in its thread so the agent prepares an answer now.
+      if (
+        groups[baseJid] &&
+        isUserReport(
+          {
+            channel: msg.channel,
+            ts: msg.ts,
+            thread_ts: threadTs,
+            user: msg.user,
+            bot_id: msg.bot_id,
+            subtype,
+          },
+          USER_REPORTS_CHANNEL_ID,
+          this.botUserId,
+        )
+      ) {
+        const reportThreadJid = `${baseJid}:thread:${msg.ts}`;
+        this.opts.onChatMetadata(
+          reportThreadJid,
+          timestamp,
+          undefined,
+          'slack',
+          true,
+        );
+        if (!groups[reportThreadJid]) {
+          groups[reportThreadJid] = {
+            ...groups[baseJid],
+            requiresTrigger: groups[baseJid].requiresTrigger ?? true,
+          };
+        }
+        // Typing indicator (👀) lands on the report itself
+        this.lastMessageTs.set(reportThreadJid, msg.ts);
+        logger.info({ jid: reportThreadJid }, 'Auto-triaging user report');
+        this.opts.onMessage(reportThreadJid, {
+          id: `${msg.ts}-autotriage`,
+          chat_jid: reportThreadJid,
+          sender: 'system',
+          sender_name: 'auto-triage',
+          content: `@${ASSISTANT_NAME} ${USER_REPORT_PROMPT}`,
+          timestamp: new Date(parseFloat(msg.ts) * 1000 + 1).toISOString(),
+          is_from_me: true,
+          is_bot_message: false,
+        });
+      }
     });
   }
 
