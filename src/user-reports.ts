@@ -39,4 +39,5 @@ export const USER_REPORT_PROMPT = `[Auto-triage] Nouveau report utilisateur ci-d
    • les constats clés avec preuves (IDs, dates, valeurs), concis ;
    • un brouillon de réponse prêt à envoyer, dans la langue de l'utilisateur, ton court et amical (tutoiement), comme nos réponses habituelles.
 4. S'il manque une info ou si une décision humaine est nécessaire (ex. débannir, rembourser), dis exactement ce qu'il faut et propose les options avec ta recommandation, plutôt qu'un brouillon définitif.
-5. Pour une simple suggestion produit : courte évaluation (pertinence, existant, effort) et brouillon de remerciement bref.`;
+5. Pour une simple suggestion produit : courte évaluation (pertinence, existant, effort) et brouillon de remerciement bref.
+6. Si le report semble urgent (incident touchant plusieurs utilisateurs, app/paiements/récompenses cassés, perte d'argent ou de données, problème légal ou de sécurité, utilisateur à qui il faut répondre vite), commence ta réponse par "🚨 Urgent" et mentionne directement Célian et Guillaume en écrivant exactement <@U09ULJQ2C86> <@U0AA6SD1PCG> (syntaxe de mention Slack, pas "@Célian"). Sinon, ne mentionne personne.`;
