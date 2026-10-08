@@ -12,6 +12,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendImage: (jid: string, filePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -78,7 +79,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (
+                data.type === 'message' &&
+                data.chatJid &&
+                (data.text || data.imageFile)
+              ) {
                 // Authorization: verify this group can send to this chatJid
                 // Fall back to base channel JID for thread JIDs
                 const targetGroup =
@@ -93,7 +98,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  if (data.imageFile) {
+                    // basename() keeps the read inside this group's files dir
+                    const imagePath = path.join(
+                      ipcBaseDir,
+                      sourceGroup,
+                      'files',
+                      path.basename(data.imageFile),
+                    );
+                    try {
+                      await deps.sendImage(
+                        data.chatJid,
+                        imagePath,
+                        data.text || undefined,
+                      );
+                    } finally {
+                      fs.rmSync(imagePath, { force: true });
+                    }
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',

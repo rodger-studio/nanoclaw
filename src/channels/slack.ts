@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { App, LogLevel } from '@slack/bolt';
 import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
 
@@ -418,6 +421,25 @@ export class SlackChannel implements Channel {
         'Failed to send Slack message, queued',
       );
     }
+  }
+
+  async sendImage(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void> {
+    const { channelId, threadTs } = parseSlackJid(jid);
+    // Not queued on failure: the IPC watcher deletes the file after this call.
+    const upload = {
+      channel_id: channelId,
+      file: fs.readFileSync(filePath),
+      filename: path.basename(filePath),
+      ...(caption ? { initial_comment: caption } : {}),
+    };
+    await this.app.client.files.uploadV2(
+      threadTs ? { ...upload, thread_ts: threadTs } : upload,
+    );
+    logger.info({ jid, file: path.basename(filePath) }, 'Slack image sent');
   }
 
   isConnected(): boolean {

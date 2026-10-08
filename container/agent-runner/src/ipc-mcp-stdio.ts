@@ -14,6 +14,9 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const FILES_DIR = path.join(IPC_DIR, 'files');
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -41,25 +44,48 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Optionally target a different channel/DM by specifying target_jid (use when the user explicitly asks to send somewhere else, e.g. 'send this to my DMs').",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. To post an image (chart, screenshot, rendered report) as the message itself, pass image_path. Optionally target a different channel/DM by specifying target_jid (use when the user explicitly asks to send somewhere else, e.g. 'send this to my DMs').",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
     target_jid: z.string().optional().describe('Target a different channel/DM by JID. Only use when the user explicitly asks to send to another channel. The host will authorize the request.'),
+    image_path: z.string().optional().describe('Absolute path to a PNG, JPEG, GIF or WebP file in your container (e.g. /tmp/report.png). It is uploaded as the message itself and `text` becomes its caption (text may be empty). Slack only. Never upload images elsewhere (GitHub, etc.) just to share them.'),
   },
   async (args) => {
+    let imageFile: string | undefined;
+    if (args.image_path) {
+      const ext = path.extname(args.image_path).toLowerCase();
+      if (!IMAGE_EXTENSIONS.has(ext)) {
+        return { content: [{ type: 'text' as const, text: `Unsupported image type "${ext}". Use one of: ${[...IMAGE_EXTENSIONS].join(', ')}.` }], isError: true };
+      }
+      let size: number;
+      try {
+        size = fs.statSync(args.image_path).size;
+      } catch {
+        return { content: [{ type: 'text' as const, text: `Image not found: ${args.image_path}` }], isError: true };
+      }
+      if (size > MAX_IMAGE_BYTES) {
+        return { content: [{ type: 'text' as const, text: `Image is too large (${size} bytes, max ${MAX_IMAGE_BYTES}).` }], isError: true };
+      }
+      // Copy into the IPC files dir, the only place the host reads images from
+      fs.mkdirSync(FILES_DIR, { recursive: true });
+      imageFile = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+      fs.copyFileSync(args.image_path, path.join(FILES_DIR, imageFile));
+    }
+
     const data: Record<string, string | undefined> = {
       type: 'message',
       chatJid: args.target_jid || chatJid,
       text: args.text,
       sender: args.sender || undefined,
+      imageFile,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    return { content: [{ type: 'text' as const, text: imageFile ? 'Message with image sent.' : 'Message sent.' }] };
   },
 );
 

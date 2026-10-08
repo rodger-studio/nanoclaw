@@ -194,7 +194,7 @@ function buildVolumeMounts(
   // This prevents cross-channel message leaks when multiple channels
   // share the same group folder (shared agent brain).
   const groupIpcDir = resolveChannelIpcPath(chatJid);
-  for (const sub of ['messages', 'tasks', 'input']) {
+  for (const sub of ['messages', 'tasks', 'input', 'files']) {
     const dir = path.join(groupIpcDir, sub);
     fs.mkdirSync(dir, { recursive: true });
     // Ensure world-writable even if directory pre-existed or umask
