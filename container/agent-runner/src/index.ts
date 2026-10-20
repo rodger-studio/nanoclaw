@@ -417,7 +417,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__rodger-bi__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -433,6 +434,13 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.RODGER_BI_API_KEY ? {
+          'rodger-bi': {
+            type: 'http' as const,
+            url: 'https://bi.rodgerstudio.com/mcp',
+            headers: { Authorization: `Bearer ${process.env.RODGER_BI_API_KEY}` },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
