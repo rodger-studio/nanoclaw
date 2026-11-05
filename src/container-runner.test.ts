@@ -14,7 +14,11 @@ vi.mock('./config.js', () => ({
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HOST_DATA_DIR: '/tmp/nanoclaw-test-data',
+  HOST_GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HOST_PROJECT_DIR: process.cwd(),
   IDLE_TIMEOUT: 1800000, // 30min
+  INSTANCE_NAME: 'nanoclaw',
   TIMEZONE: 'America/Los_Angeles',
 }));
 
