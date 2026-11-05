@@ -69,7 +69,9 @@ export async function getGitHubToken(): Promise<string | null> {
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[github-app] Failed to get installation token: ${res.status} ${body}`);
+    console.error(
+      `[github-app] Failed to get installation token: ${res.status} ${body}`,
+    );
     return null;
   }
 
