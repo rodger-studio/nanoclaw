@@ -692,6 +692,46 @@ describe('SlackChannel', () => {
       expect(triageCalls(opts)).toHaveLength(0);
     });
 
+    it('triages a feedback follow-up in its thread and pings the owners', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_FEEDBACK_APP',
+          botId: 'B_FEEDBACK',
+          ts: '1704067300.000000',
+          threadTs: '1704067200.000100',
+          text: ':envelope: Contact — Clutch: toujours pas reçu ma carte',
+        }),
+      );
+
+      const threadJid = 'slack:C_REPORTS:thread:1704067200.000100';
+      const calls = triageCalls(opts);
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toBe(threadJid);
+      expect(calls[0][1].id).toBe('1704067300.000000-autotriage');
+      expect(calls[0][1].content).toContain('vient de relancer');
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+        channel: 'C_REPORTS',
+        thread_ts: '1704067200.000100',
+        text: expect.stringContaining('<@U09ULJQ2C86> <@U0AA6SD1PCG>'),
+      });
+    });
+
+    it('does not ping the owners on a new report', async () => {
+      await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_FEEDBACK_APP',
+          botId: 'B_FEEDBACK',
+          ts: '1704067200.000100',
+          text: ':envelope: Contact — Clutch: mon compte est suspendu',
+        }),
+      );
+      expect(currentApp().client.chat.postMessage).not.toHaveBeenCalled();
+    });
+
     it('ignores bot posts in other channels', async () => {
       const { opts } = await setup();
       await triggerMessageEvent(
