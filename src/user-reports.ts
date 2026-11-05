@@ -8,7 +8,7 @@
  *
  * Clutch posts a user's follow-up messages (replies to support, repeat
  * reports) as replies in that user's open thread. Those are triaged too, and
- * Célian and Guillaume are pinged since they may not follow the thread.
+ * Célian and Guillaume are pinged unless one of them already follows it.
  */
 
 export interface ReportCandidate {
@@ -24,8 +24,26 @@ export interface ReportCandidate {
 
 export type UserReportKind = 'new' | 'follow-up';
 
-/** Slack mentions of the people to ping on urgent reports and on follow-ups. */
-export const REPORT_OWNERS_MENTION = '<@U09ULJQ2C86> <@U0AA6SD1PCG>';
+/** Slack user ids of the people to ping on urgent reports and on follow-ups (Célian, Guillaume). */
+export const REPORT_OWNER_IDS = ['U09ULJQ2C86', 'U0AA6SD1PCG'];
+
+export const REPORT_OWNERS_MENTION = REPORT_OWNER_IDS.map(
+  (id) => `<@${id}>`,
+).join(' ');
+
+/**
+ * Whether one of the owners already follows a thread: then they get the
+ * follow-up notification and nobody needs a ping. Slack has no API for a
+ * thread's followers, but it subscribes whoever replies in a thread or is
+ * @mentioned in it.
+ */
+export function ownerFollowsThread(
+  messages: { user?: string; text?: string }[],
+): boolean {
+  return REPORT_OWNER_IDS.some((id) =>
+    messages.some((m) => m.user === id || (m.text ?? '').includes(`<@${id}>`)),
+  );
+}
 
 // Fallback text of a feedback post (`:envelope: Contact — Clutch: …`, built by
 // @rodger/feedback). Tells a user's follow-up apart from the other bot replies
@@ -57,7 +75,7 @@ export const USER_REPORT_PROMPT = `[Auto-triage] Nouveau report utilisateur ci-d
 5. Pour une simple suggestion produit : courte évaluation (pertinence, existant, effort) et brouillon de remerciement bref.
 6. Si le report semble urgent (incident touchant plusieurs utilisateurs, app/paiements/récompenses cassés, perte d'argent ou de données, problème légal ou de sécurité, utilisateur à qui il faut répondre vite), commence ta réponse par "🚨 Urgent" et mentionne directement Célian et Guillaume en écrivant exactement ${REPORT_OWNERS_MENTION} (syntaxe de mention Slack, pas "@Célian"). Sinon, ne mentionne personne.`;
 
-export const USER_REPORT_FOLLOWUP_PROMPT = `[Auto-triage] L'utilisateur vient de relancer dans ce fil (dernier message du bot ci-dessus). Célian et Guillaume ont déjà été notifiés : ne les mentionne pas à nouveau.
+export const USER_REPORT_FOLLOWUP_PROMPT = `[Auto-triage] L'utilisateur vient de relancer dans ce fil (dernier message du bot ci-dessus). Célian et Guillaume sont déjà notifiés : ne les mentionne pas.
 
 1. Relis tout le fil : le report d'origine, ton analyse précédente, les réponses déjà envoyées à l'utilisateur ("Réponse envoyée à l'utilisateur") et les échanges de l'équipe.
 2. Dis ce qui est nouveau dans cette relance (info en plus, problème non résolu, nouveau sujet, simple remerciement) et vérifie avec tes outils ce qui a changé depuis (statut de la rédemption, résolution du marché, compte…).

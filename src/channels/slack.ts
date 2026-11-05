@@ -13,6 +13,7 @@ import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import {
+  ownerFollowsThread,
   REPORT_OWNERS_MENTION,
   USER_REPORT_FOLLOWUP_PROMPT,
   USER_REPORT_PROMPT,
@@ -358,12 +359,8 @@ export class SlackChannel implements Channel {
           { jid: reportThreadJid, kind: reportKind },
           'Auto-triaging user report',
         );
-        // Bot replies in a thread notify only its followers: ping the owners.
         if (reportKind === 'follow-up') {
-          void this.sendMessage(
-            reportThreadJid,
-            `${REPORT_OWNERS_MENTION} 🔁 Relance de l'utilisateur dans ce fil.`,
-          );
+          void this.pingOwnersIfUnfollowed(reportThreadJid);
         }
         this.opts.onMessage(reportThreadJid, {
           id: `${msg.ts}-autotriage`,
@@ -639,6 +636,29 @@ export class SlackChannel implements Channel {
       logger.debug({ userId, err }, 'Failed to resolve Slack user name');
       return undefined;
     }
+  }
+
+  /**
+   * A bot reply in a thread notifies only the thread's followers: mention the
+   * report owners unless one of them already follows it. If the thread can't
+   * be read, ping them rather than risk a silent follow-up.
+   */
+  private async pingOwnersIfUnfollowed(jid: string): Promise<void> {
+    const { channelId, threadTs } = parseSlackJid(jid);
+    try {
+      const result = await this.app.client.conversations.replies({
+        channel: channelId,
+        ts: threadTs!,
+        limit: 1000,
+      });
+      if (ownerFollowsThread(result.messages ?? [])) return;
+    } catch (err) {
+      logger.warn({ jid, err }, 'Failed to read report thread, pinging owners');
+    }
+    await this.sendMessage(
+      jid,
+      `${REPORT_OWNERS_MENTION} 🔁 Relance de l'utilisateur dans ce fil.`,
+    );
   }
 
   /**

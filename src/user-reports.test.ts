@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { userReportKind } from './user-reports.js';
+import { ownerFollowsThread, userReportKind } from './user-reports.js';
 describe('userReportKind', () => {
   const report = {
     channel: 'C_REPORTS',
@@ -47,5 +47,21 @@ describe('userReportKind', () => {
     ).toBeNull();
     expect(userReportKind(report, 'C_REPORTS', 'U_APP')).toBeNull();
     expect(userReportKind(followUp, 'C_REPORTS', 'U_APP')).toBeNull();
+  });
+});
+
+describe('ownerFollowsThread', () => {
+  it('is false for a thread no owner joined', () => {
+    expect(
+      ownerFollowsThread([{ text: ':envelope: Contact — Clutch: x' }]),
+    ).toBe(false);
+  });
+  it('is true once one owner replied or was mentioned', () => {
+    expect(ownerFollowsThread([{ user: 'U09ULJQ2C86', text: 'ok' }])).toBe(
+      true,
+    );
+    expect(
+      ownerFollowsThread([{ user: 'U_BOT', text: 'cc <@U0AA6SD1PCG>' }]),
+    ).toBe(true);
   });
 });

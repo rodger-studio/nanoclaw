@@ -51,6 +51,7 @@ vi.mock('@slack/bolt', () => ({
           channels: [],
           response_metadata: {},
         }),
+        replies: vi.fn().mockResolvedValue({ messages: [] }),
       },
       users: {
         info: vi.fn().mockResolvedValue({
@@ -692,30 +693,87 @@ describe('SlackChannel', () => {
       expect(triageCalls(opts)).toHaveLength(0);
     });
 
-    it('triages a feedback follow-up in its thread and pings the owners', async () => {
-      const { opts } = await setup();
-      await triggerMessageEvent(
-        createMessageEvent({
-          channel: 'C_REPORTS',
-          user: 'U_FEEDBACK_APP',
-          botId: 'B_FEEDBACK',
-          ts: '1704067300.000000',
-          threadTs: '1704067200.000100',
-          text: ':envelope: Contact — Clutch: toujours pas reçu ma carte',
-        }),
-      );
+    const followUpEvent = () =>
+      createMessageEvent({
+        channel: 'C_REPORTS',
+        user: 'U_FEEDBACK_APP',
+        botId: 'B_FEEDBACK',
+        ts: '1704067300.000000',
+        threadTs: '1704067200.000100',
+        text: ':envelope: Contact — Clutch: toujours pas reçu ma carte',
+      });
 
-      const threadJid = 'slack:C_REPORTS:thread:1704067200.000100';
+    const pingTexts = () =>
+      currentApp()
+        .client.chat.postMessage.mock.calls.map(([arg]: [any]) => arg)
+        .filter((arg: any) => arg.thread_ts === '1704067200.000100')
+        .map((arg: any) => arg.text);
+
+    it('triages a feedback follow-up in its thread', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(followUpEvent());
+
       const calls = triageCalls(opts);
       expect(calls).toHaveLength(1);
-      expect(calls[0][0]).toBe(threadJid);
+      expect(calls[0][0]).toBe('slack:C_REPORTS:thread:1704067200.000100');
       expect(calls[0][1].id).toBe('1704067300.000000-autotriage');
       expect(calls[0][1].content).toContain('vient de relancer');
-      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
-        channel: 'C_REPORTS',
-        thread_ts: '1704067200.000100',
-        text: expect.stringContaining('<@U09ULJQ2C86> <@U0AA6SD1PCG>'),
+    });
+
+    it('pings both owners when neither follows the thread', async () => {
+      await setup();
+      await triggerMessageEvent(followUpEvent());
+
+      await vi.waitFor(() => expect(pingTexts()).toHaveLength(1));
+      expect(pingTexts()[0]).toMatch(/^<@U09ULJQ2C86> <@U0AA6SD1PCG> /);
+      expect(currentApp().client.conversations.replies).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'C_REPORTS',
+          ts: '1704067200.000100',
+        }),
+      );
+    });
+
+    it('does not ping when one owner already follows the thread', async () => {
+      await setup();
+      currentApp().client.conversations.replies.mockResolvedValueOnce({
+        messages: [
+          { bot_id: 'B_FEEDBACK', text: ':envelope: Contact — Clutch: x' },
+          { user: 'U0AA6SD1PCG', text: 'je regarde' },
+        ],
       });
+      await triggerMessageEvent(followUpEvent());
+
+      await vi.waitFor(() =>
+        expect(currentApp().client.conversations.replies).toHaveBeenCalled(),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(pingTexts()).toHaveLength(0);
+    });
+
+    it('does not ping when an owner was mentioned in the thread', async () => {
+      await setup();
+      currentApp().client.conversations.replies.mockResolvedValueOnce({
+        messages: [{ user: 'U_BOT_123', text: '🚨 Urgent <@U09ULJQ2C86>' }],
+      });
+      await triggerMessageEvent(followUpEvent());
+
+      await vi.waitFor(() =>
+        expect(currentApp().client.conversations.replies).toHaveBeenCalled(),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(pingTexts()).toHaveLength(0);
+    });
+
+    it('pings both owners when the thread cannot be read', async () => {
+      await setup();
+      currentApp().client.conversations.replies.mockRejectedValueOnce(
+        new Error('missing_scope'),
+      );
+      await triggerMessageEvent(followUpEvent());
+
+      await vi.waitFor(() => expect(pingTexts()).toHaveLength(1));
+      expect(pingTexts()[0]).toMatch(/^<@U09ULJQ2C86> <@U0AA6SD1PCG> /);
     });
 
     it('does not ping the owners on a new report', async () => {
