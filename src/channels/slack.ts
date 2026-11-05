@@ -12,7 +12,13 @@ import {
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
-import { isUserReport, USER_REPORT_PROMPT } from '../user-reports.js';
+import {
+  ownerFollowsThread,
+  REPORT_OWNERS_MENTION,
+  USER_REPORT_FOLLOWUP_PROMPT,
+  USER_REPORT_PROMPT,
+  userReportKind,
+} from '../user-reports.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -314,22 +320,26 @@ export class SlackChannel implements Channel {
 
       // Auto-triage: a new bot report in the user-reports channel gets a
       // synthetic trigger in its thread so the agent prepares an answer now.
-      if (
-        groups[baseJid] &&
-        isUserReport(
-          {
-            channel: msg.channel,
-            ts: msg.ts,
-            thread_ts: threadTs,
-            user: msg.user,
-            bot_id: msg.bot_id,
-            subtype,
-          },
-          USER_REPORTS_CHANNEL_ID,
-          this.botUserId,
-        )
-      ) {
-        const reportThreadJid = `${baseJid}:thread:${msg.ts}`;
+      // A user's follow-up, posted by the app as a reply in their report
+      // thread, is triaged in that same thread.
+      const reportKind = groups[baseJid]
+        ? userReportKind(
+            {
+              channel: msg.channel,
+              ts: msg.ts,
+              thread_ts: threadTs,
+              user: msg.user,
+              bot_id: msg.bot_id,
+              subtype,
+              text: msg.text,
+            },
+            USER_REPORTS_CHANNEL_ID,
+            this.botUserId,
+          )
+        : null;
+      if (reportKind) {
+        const reportTs = reportKind === 'follow-up' ? threadTs! : msg.ts;
+        const reportThreadJid = `${baseJid}:thread:${reportTs}`;
         this.opts.onChatMetadata(
           reportThreadJid,
           timestamp,
@@ -343,15 +353,25 @@ export class SlackChannel implements Channel {
             requiresTrigger: groups[baseJid].requiresTrigger ?? true,
           };
         }
-        // Typing indicator (👀) lands on the report itself
+        // Typing indicator (👀) lands on the report (or follow-up) itself
         this.lastMessageTs.set(reportThreadJid, msg.ts);
-        logger.info({ jid: reportThreadJid }, 'Auto-triaging user report');
+        logger.info(
+          { jid: reportThreadJid, kind: reportKind },
+          'Auto-triaging user report',
+        );
+        if (reportKind === 'follow-up') {
+          void this.pingOwnersIfUnfollowed(reportThreadJid);
+        }
         this.opts.onMessage(reportThreadJid, {
           id: `${msg.ts}-autotriage`,
           chat_jid: reportThreadJid,
           sender: 'system',
           sender_name: 'auto-triage',
-          content: `@${ASSISTANT_NAME} ${USER_REPORT_PROMPT}`,
+          content: `@${ASSISTANT_NAME} ${
+            reportKind === 'follow-up'
+              ? USER_REPORT_FOLLOWUP_PROMPT
+              : USER_REPORT_PROMPT
+          }`,
           timestamp: new Date(parseFloat(msg.ts) * 1000 + 1).toISOString(),
           is_from_me: true,
           is_bot_message: false,
@@ -616,6 +636,29 @@ export class SlackChannel implements Channel {
       logger.debug({ userId, err }, 'Failed to resolve Slack user name');
       return undefined;
     }
+  }
+
+  /**
+   * A bot reply in a thread notifies only the thread's followers: mention the
+   * report owners unless one of them already follows it. If the thread can't
+   * be read, ping them rather than risk a silent follow-up.
+   */
+  private async pingOwnersIfUnfollowed(jid: string): Promise<void> {
+    const { channelId, threadTs } = parseSlackJid(jid);
+    try {
+      const result = await this.app.client.conversations.replies({
+        channel: channelId,
+        ts: threadTs!,
+        limit: 1000,
+      });
+      if (ownerFollowsThread(result.messages ?? [])) return;
+    } catch (err) {
+      logger.warn({ jid, err }, 'Failed to read report thread, pinging owners');
+    }
+    await this.sendMessage(
+      jid,
+      `${REPORT_OWNERS_MENTION} 🔁 Relance de l'utilisateur dans ce fil.`,
+    );
   }
 
   /**
