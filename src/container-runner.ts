@@ -38,6 +38,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { readAllEnvVars } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { projectSecretShadows } from './secret-shadows.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -102,13 +103,20 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
+    // Shadow secrets (.env and its backups, secrets/, data/env/) so the agent
+    // cannot read them from the mounted project root. Credentials are injected
+    // by the credential proxy, never exposed to containers.
+    for (const shadow of projectSecretShadows(
+      projectRoot,
+      '/workspace/project',
+      path.join(DATA_DIR, 'empty'),
+    )) {
       mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
+        hostPath:
+          shadow.hostPath === '/dev/null'
+            ? shadow.hostPath
+            : toHostPath(shadow.hostPath),
+        containerPath: shadow.containerPath,
         readonly: true,
       });
     }

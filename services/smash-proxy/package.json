@@ -1,0 +1,9 @@
+{
+  "name": "smash-proxy",
+  "private": true,
+  "type": "module",
+  "description": "Read-only window for NanoClaw agents on Smash (Render API + smash-db)",
+  "dependencies": {
+    "pg": "8.23.1"
+  }
+}
