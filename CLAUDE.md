@@ -54,8 +54,6 @@ ssh celian@85.190.242.114 "sg docker -c 'cd ~/nanoclaw && docker compose restart
 
 Key files: `Dockerfile` (host image), `docker-compose.yml` (compose config), `.dockerignore`.
 
-`services/smash-proxy/` is a separate container on the VPS: the agents' read-only window on Smash (Render logs/deploys + smash-db), used by the `smash-render` skill. Its secrets live in `~/.config/smash-proxy/` (outside the project root, which the main agent can read); see its README.
-
 The main agent mounts the project root read-only: never leave a secret there. `.env*` files, `secrets/` and `data/env/` are shadowed (`src/secret-shadows.ts`); keep `.env` backups in `~/.config/nanoclaw-backups/`.
 
 Non-sensitive `.env` vars are auto-forwarded to agent containers. Vars prefixed with `ANTHROPIC_`, `CLAUDE_CODE_`, `SLACK_`, `WHATSAPP_`, `TELEGRAM_`, `DISCORD_`, or `GMAIL_` are blocked (handled by credential proxy or host-only).
