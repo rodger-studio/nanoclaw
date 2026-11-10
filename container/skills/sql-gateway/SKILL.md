@@ -1,6 +1,6 @@
 ---
 name: sql-gateway
-description: Query production databases (All Is Good, Date Reminder, Sleep Tracker) with read-only SQL. Use when the user asks about app data, metrics, users, entries, or anything that requires looking at production data.
+description: Query production databases (All Is Good, Date Reminder, Sleep Tracker, Smash) with read-only SQL. Use when the user asks about app data, metrics, users, entries, or anything that requires looking at production data.
 allowed-tools: Bash(curl:*)
 ---
 
@@ -15,11 +15,20 @@ Query production PostgreSQL databases via the SQL gateway API.
 | `all-is-good` | All Is Good | Gratitude journaling app |
 | `date-reminder` | Date Reminder | Important dates tracker |
 | `sleep-tracker` | Sleep Tracker | Sleep tracking and coaching app |
+| `smash` | Smash | Ad creation and publishing (Agent Runs, Generations, social accounts) — see below |
+
+## Smash
+
+`smash` is read through a role that can only `SELECT`:
+- Credential columns are hidden (OAuth tokens, sessions, passwords): `select *` on `account`, `session`, `verification`, `oauth_states`, `smash_social_accounts`, `smash_ad_accounts`, `smash_broll_jobs` fails; list the columns you need.
+- A table added after 2026-11-10 may not be readable yet (`permission denied for table`): say so and ask Guillaume to grant it.
+- Schema: repo `rodger-studio/smash`, `src/server/db/schema.ts` (Drizzle). Domain terms: `src/server/smash/GLOSSARY.md`. Agent Runs: `agent_runs` (`status`, `error`, `created_at`, `updated_at`, `conversation_id`); the agent's history (`agent_log_*`) is reached through `agent_conversations.id`.
+- Smash's logs and deploys are not available here (Render); work from the data and the code.
 
 ## How to Query
 
 ```bash
-curl -s -X POST https://sql-gateway-api.onrender.com/query \
+curl -s -X POST https://sql-gateway-api.onrender.com/api/v1/query \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $RODGER_SQL_GATEWAY__API_TOKEN" \
   -d '{"database": "sleep-tracker", "sql": "SELECT count(*) FROM \"User\""}'
