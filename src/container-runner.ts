@@ -16,6 +16,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   HOST_DATA_DIR,
+  HOST_PROJECT_MIRROR,
   HOST_GROUPS_DIR,
   HOST_PROJECT_DIR,
   IDLE_TIMEOUT,
@@ -107,7 +108,7 @@ function buildVolumeMounts(
     // cannot read them from the mounted project root. Credentials are injected
     // by the credential proxy, never exposed to containers.
     for (const shadow of projectSecretShadows(
-      projectRoot,
+      HOST_PROJECT_MIRROR || projectRoot,
       '/workspace/project',
       path.join(DATA_DIR, 'empty'),
     )) {

@@ -16,6 +16,9 @@ services:
       - ./.env:/app/.env:ro
       # GitHub App private key for installation token generation
       - ./secrets:/app/secrets:ro
+      # Read-only view of the host project root: the main agent mounts the host
+      # root, so its secret shadows are computed from here (src/secret-shadows.ts)
+      - .:/app/host-project:ro
       # Security config (mount/sender allowlists) — stored outside project root
       - ~/.config/nanoclaw:/root/.config/nanoclaw:ro
     env_file:
@@ -24,6 +27,7 @@ services:
       # Tell NanoClaw where the project lives on the HOST filesystem
       # so Docker volume mounts for agent containers use correct paths
       - HOST_PROJECT_ROOT=${HOST_PROJECT_ROOT:-/home/celian/nanoclaw}
+      - HOST_PROJECT_MIRROR=/app/host-project
       - HOME=/root
       - TZ=${TZ:-Europe/Paris}
       - LOG_LEVEL=${LOG_LEVEL:-info}

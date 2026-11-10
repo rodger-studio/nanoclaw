@@ -58,6 +58,11 @@ export const HOST_GROUPS_DIR = path.resolve(HOST_PROJECT_ROOT, 'groups');
 export const HOST_DATA_DIR = path.resolve(HOST_PROJECT_ROOT, 'data');
 export const HOST_PROJECT_DIR = HOST_PROJECT_ROOT;
 
+// Read-only view of the HOST project root, when NanoClaw runs in a container.
+// The main agent mounts the host root, not /app, so secret shadows must be
+// computed from what the host has (e.g. .env backups that /app never sees).
+export const HOST_PROJECT_MIRROR = process.env.HOST_PROJECT_MIRROR || '';
+
 export const INSTANCE_NAME = process.env.INSTANCE_NAME || 'nanoclaw';
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || `${INSTANCE_NAME}-agent:latest`;

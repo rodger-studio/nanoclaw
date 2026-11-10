@@ -10,7 +10,12 @@ Render. Agents use it through the `smash-render` skill
   every other service are refused. Redirects are not followed.
 - `POST /sql` → smash-db as a Postgres role that can only `SELECT`, with
   credential columns hidden, one statement per request, 15 s timeout,
-  1000 rows max.
+  1000 rows max. Only `SELECT` / `WITH` / `EXPLAIN` / `SHOW` / `TABLE` /
+  `VALUES`; advisory locks, `NOTIFY`, `pg_sleep`, `set_config`, row locks
+  (`FOR UPDATE/SHARE`) and `U&` identifiers are refused, and the connection is
+  destroyed after each request. A SELECT-only role can still take advisory
+  locks (Smash's worker uses them to run each job once), which managed
+  Postgres does not let us revoke: these guards are what prevent it.
 - Bearer token (`PROXY_TOKEN`, constant-time check), 60 requests per minute.
 
 ## Where the secrets live
@@ -44,12 +49,14 @@ capabilities, `no-new-privileges`, and CPU / memory / pid limits.
 
 `rafa_readonly` on smash-db: `LOGIN NOINHERIT CONNECTION LIMIT 5`,
 `default_transaction_read_only = on`, `statement_timeout = 15s`,
-`SELECT` on `public` (default privileges for tables created by `smash`), no
-other privilege. Column grants hide: `account` tokens and password,
+`SELECT` on the `public` tables that existed on 2026-11-10, no other
+privilege. **Fail-closed: a new table is not readable until granted**
+(`GRANT SELECT ON public.<table> TO rafa_readonly;`, as `smash`, after checking
+it holds no credential). Column grants hide: `account` tokens and password,
 `session.token`, `verification.value`, `oauth_states.code_verifier`,
 `smash_broll_jobs.webhook_token`, `smash_social_accounts` OAuth tokens,
-`smash_ad_accounts.access_token`. **A new table or column holding a secret must
-be hidden the same way** (revoke the table, grant the other columns).
+`smash_ad_accounts.access_token`. A table with a credential column gets column grants instead: revoke the
+table, grant the other columns.
 
 ## Revoke
 

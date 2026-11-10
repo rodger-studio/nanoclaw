@@ -170,6 +170,8 @@ async function runSql(req, res) {
   }
   if (typeof sql !== 'string' || !sql.trim()) return send(res, 400, { error: 'champ `sql` manquant' });
   if (sql.length > SQL_MAX_LENGTH) return send(res, 400, { error: 'requête trop longue' });
+  const refusal = sqlRefusal(sql);
+  if (refusal) return send(res, 400, { error: refusal });
   const client = await pool.connect();
   try {
     await client.query('BEGIN READ ONLY');
@@ -185,10 +187,29 @@ async function runSql(req, res) {
   } catch (error) {
     send(res, 400, { error: error.message });
   } finally {
-    // Rolling back also undoes any SET the statement made on this connection.
     await client.query('ROLLBACK').catch(() => {});
-    client.release();
+    // Destroy the connection instead of returning it to the pool: nothing a
+    // statement left on the session (e.g. a session advisory lock, which
+    // survives ROLLBACK and would block Smash's job loops) outlives the request.
+    client.release(true);
   }
+}
+
+// The Postgres role is the real barrier (SELECT only). This is defense in
+// depth against what a SELECT-only role can still do: take advisory locks
+// (Smash's worker relies on them), NOTIFY, sleep, or run dynamic SQL via DO.
+const SQL_FIRST_KEYWORDS = new Set(['select', 'with', 'explain', 'show', 'table', 'values']);
+const SQL_DENIED = /\b(pg_(try_)?advisory\w*|pg_notify|pg_sleep\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|dblink\w*|lo_\w+|set_config|pg_read_\w+|pg_ls_\w+|pg_stat_file)\b|\bU&|\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b/i;
+
+function sqlRefusal(sql) {
+  const withoutComments = sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ');
+  const firstKeyword = withoutComments.trim().split(/[\s(]+/, 1)[0].toLowerCase();
+  if (!SQL_FIRST_KEYWORDS.has(firstKeyword)) {
+    return 'seules les requêtes SELECT / WITH / EXPLAIN / SHOW / TABLE / VALUES sont acceptées';
+  }
+  const denied = withoutComments.match(SQL_DENIED);
+  if (denied) return `fonction ou clause refusée : ${denied[0]}`;
+  return null;
 }
 
 // ---------- HTTP ----------

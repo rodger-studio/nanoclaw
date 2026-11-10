@@ -58,7 +58,7 @@ curl -s -H "$H" -H "Content-Type: application/json" \
   $B/sql
 ```
 
-- One statement per request (SELECT / WITH / EXPLAIN), 15 s timeout, 1000 rows max (`truncated: true` beyond).
+- One statement per request (SELECT / WITH / EXPLAIN / SHOW / TABLE / VALUES), 15 s timeout, 1000 rows max (`truncated: true` beyond). Locks (`FOR UPDATE`, advisory locks), `pg_sleep` and `set_config` are refused.
 - Credential columns are hidden (OAuth tokens, sessions, passwords): `select *` on `account`, `session`, `verification`, `oauth_states`, `smash_social_accounts`, `smash_ad_accounts`, `smash_broll_jobs` fails; list the columns you need.
 - Schema: repo `rodger-studio/smash`, `src/server/db/schema.ts` (Drizzle). Domain terms: `src/server/smash/GLOSSARY.md`. Start with `select table_name from information_schema.tables where table_schema = 'public'`.
 - Every Smash table has `organization_id`; the agent harness log tables (`agent_log_*`) are reached through `agent_conversations.id`.
@@ -70,5 +70,5 @@ curl -s -H "$H" -H "Content-Type: application/json" \
 | 401 | Missing or wrong `$RAFA_SMASH_PROXY_TOKEN` |
 | 403 | Endpoint, query param or resource outside the allowlist (env vars, connection info and other services are never available) |
 | 429 | More than 60 requests in a minute: wait, then batch your questions |
-| 400 | SQL error, or permission denied on a hidden column |
+| 400 | SQL error; permission denied on a hidden column; or a table added after 2026-11-10 that is not granted yet (say so and ask Guillaume to grant it) |
 | 502 | Render or the database did not answer; retry once |
