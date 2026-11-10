@@ -9,6 +9,10 @@
  * Clutch posts a user's follow-up messages (replies to support, repeat
  * reports) as replies in that user's open thread. Those are triaged too, and
  * Célian and Guillaume are pinged unless one of them already follows it.
+ *
+ * Smash (smash.rodgerstudio.com, repo rodger-studio/smash) posts the bug
+ * reports of its team (« Signaler à Guillaume ») here too: those get a Smash
+ * triage that reads the smash repo instead of the app user tools.
  */
 
 export interface ReportCandidate {
@@ -22,7 +26,7 @@ export interface ReportCandidate {
   text?: string;
 }
 
-export type UserReportKind = 'new' | 'follow-up';
+export type UserReportKind = 'new' | 'follow-up' | 'smash-bug';
 
 /** Slack user ids of the people to ping on urgent reports and on follow-ups (Célian, Guillaume). */
 export const REPORT_OWNER_IDS = ['U09ULJQ2C86', 'U0AA6SD1PCG'];
@@ -49,6 +53,9 @@ export function ownerFollowsThread(
 // @rodger/feedback). Tells a user's follow-up apart from the other bot replies
 // in a report thread, such as "✉️ Réponse envoyée à l'utilisateur".
 const FEEDBACK_POST = /^:(bug|bulb|envelope|wave): [^\n—]+ — /;
+// First line of a Smash bug report (BUG_REPORT_HEADER in the smash repo,
+// src/server/agent/bug-reports.ts): `:bug: *Bug Smash signalé par …*`.
+const SMASH_BUG_POST = /^:bug: \*Bug Smash signalé par /;
 
 export function userReportKind(
   msg: ReportCandidate,
@@ -59,7 +66,9 @@ export function userReportKind(
   if (!msg.bot_id && msg.subtype !== 'bot_message') return null;
   // Never triage our own posts (e.g. the daily "User Report Manager" message)
   if (botUserId && msg.user === botUserId) return null;
-  if (!msg.thread_ts || msg.thread_ts === msg.ts) return 'new';
+  if (!msg.thread_ts || msg.thread_ts === msg.ts) {
+    return SMASH_BUG_POST.test(msg.text ?? '') ? 'smash-bug' : 'new';
+  }
   return FEEDBACK_POST.test(msg.text ?? '') ? 'follow-up' : null;
 }
 
@@ -82,3 +91,15 @@ export const USER_REPORT_FOLLOWUP_PROMPT = `[Auto-triage] L'utilisateur vient de
 3. N'effectue AUCUNE action : pas de ban/unban, remboursement, changement de résolution, PR, ni message envoyé à l'utilisateur. Tu prépares, l'équipe décide.
 4. Réponds dans ce fil avec une ligne de verdict en gras, les constats clés avec preuves, et un brouillon de réponse dans la langue de l'utilisateur, ton court et amical (tutoiement). Si c'est juste un remerciement sans question, dis-le en une ligne : aucune réponse nécessaire.
 5. Si la relance est urgente (mêmes critères que pour un nouveau report), commence ta réponse par "🚨 Urgent".`;
+
+export const SMASH_BUG_PROMPT = `[Auto-triage] Nouveau bug Smash ci-dessus, signalé par un membre de l'équipe depuis Smash (smash.rodgerstudio.com, l'outil interne de créas publicitaires et son Agent). Ce n'est pas un report d'utilisateur d'une app : pas de PostHog, pas de brouillon de réponse.
+
+1. Clone le code : \`git clone https://x-access-token:$GITHUB_TOKEN@github.com/rodger-studio/smash.git\`. Lis \`AGENTS.md\` (architecture : smash-web, smash-worker, smash-agent, Postgres), puis le code qui touche l'erreur du run (\`src/server/jobs/agent/\` pour l'Agent, \`patches/\` pour le harness TanStack patché). Regarde aussi les derniers commits de main et le changelog de \`docs/plans/smash-v2.md\` : le bug est peut-être déjà corrigé ou déjà connu.
+2. Pars des faits du report : le run, son erreur exacte, son message, les derniers runs (un run qui a échoué puis un run qui a réussi n'est pas le même cas qu'une conversation bloquée).
+3. N'effectue AUCUNE action : pas de PR, pas de commit, pas d'écriture en base, pas de message ailleurs. Tu prépares, Guillaume décide.
+4. Réponds dans ce fil avec :
+   • une ligne de verdict en gras (bug connu et corrigé, bug à corriger, erreur ponctuelle d'un fournisseur, mauvaise utilisation…) ;
+   • la cause probable, avec les preuves (fichier:ligne, commit, message d'erreur) ;
+   • le correctif proposé (où et quoi changer), et s'il faut débloquer la conversation à la main ;
+   • ce que tu n'as pas pu vérifier (la base et les logs de Smash ne te sont pas accessibles).
+5. Guillaume est déjà mentionné dans le report : ne le mentionne pas. Si le bug bloque toute l'équipe (Smash ou l'Agent cassé pour tous), commence ta réponse par "🚨 Urgent".`;

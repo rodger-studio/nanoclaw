@@ -15,8 +15,10 @@ import { logger } from '../logger.js';
 import {
   ownerFollowsThread,
   REPORT_OWNERS_MENTION,
+  SMASH_BUG_PROMPT,
   USER_REPORT_FOLLOWUP_PROMPT,
   USER_REPORT_PROMPT,
+  type UserReportKind,
   userReportKind,
 } from '../user-reports.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -30,6 +32,13 @@ import {
 // Slack's chat.postMessage API limits text to ~4000 characters per call.
 // Messages exceeding this are split into sequential chunks.
 const MAX_MESSAGE_LENGTH = 4000;
+
+/** The auto-triage prompt of each kind of report (user-reports.ts). */
+const TRIAGE_PROMPTS: Record<UserReportKind, string> = {
+  new: USER_REPORT_PROMPT,
+  'follow-up': USER_REPORT_FOLLOWUP_PROMPT,
+  'smash-bug': SMASH_BUG_PROMPT,
+};
 
 /**
  * Extract human-readable text from Slack Block Kit blocks and attachments.
@@ -367,11 +376,7 @@ export class SlackChannel implements Channel {
           chat_jid: reportThreadJid,
           sender: 'system',
           sender_name: 'auto-triage',
-          content: `@${ASSISTANT_NAME} ${
-            reportKind === 'follow-up'
-              ? USER_REPORT_FOLLOWUP_PROMPT
-              : USER_REPORT_PROMPT
-          }`,
+          content: `@${ASSISTANT_NAME} ${TRIAGE_PROMPTS[reportKind]}`,
           timestamp: new Date(parseFloat(msg.ts) * 1000 + 1).toISOString(),
           is_from_me: true,
           is_bot_message: false,

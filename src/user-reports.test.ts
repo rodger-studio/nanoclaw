@@ -37,6 +37,29 @@ describe('userReportKind', () => {
       userReportKind({ ...followUp, text: undefined }, 'C_REPORTS', 'U_BOT'),
     ).toBeNull();
   });
+  it('gives a Smash bug report its own triage', () => {
+    const smashBug = {
+      ...report,
+      text: ':bug: *Bug Smash signalé par Damien (damien@rodgerstudio.com)*\n*Pour* : <@U0AA6SD1PCG>',
+    };
+    expect(userReportKind(smashBug, 'C_REPORTS', 'U_BOT')).toBe('smash-bug');
+    // A reply in its thread is neither a report nor a follow-up.
+    expect(
+      userReportKind(
+        { ...smashBug, ts: '2.0', thread_ts: '1.0' },
+        'C_REPORTS',
+        'U_BOT',
+      ),
+    ).toBeNull();
+    // An app's bug report stays a user report.
+    expect(
+      userReportKind(
+        { ...report, text: ':bug: Bug Report — Clutch: [Market report] x' },
+        'C_REPORTS',
+        'U_BOT',
+      ),
+    ).toBe('new');
+  });
   it('is disabled when no reports channel is configured', () => {
     expect(userReportKind(report, undefined, 'U_BOT')).toBeNull();
   });

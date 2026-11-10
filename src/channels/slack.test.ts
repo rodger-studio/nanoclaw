@@ -604,6 +604,25 @@ describe('SlackChannel', () => {
         ([, m]: [string, any]) => m.sender === 'system',
       );
 
+    it('gives a Smash bug report the Smash triage', async () => {
+      const { opts } = await setup();
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C_REPORTS',
+          user: 'U_SMASH',
+          botId: 'B_SMASH',
+          ts: '1704067200.000200',
+          text: ':bug: *Bug Smash signalé par Damien (damien@rodgerstudio.com)*\n*Erreur* : 400',
+        }),
+      );
+
+      const calls = triageCalls(opts);
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toBe('slack:C_REPORTS:thread:1704067200.000200');
+      expect(calls[0][1].content).toContain('rodger-studio/smash.git');
+      expect(calls[0][1].content).not.toContain('PostHog (lien');
+    });
+
     it('injects a trigger into the thread of a new bot report', async () => {
       const { opts, groups } = await setup();
       await triggerMessageEvent(
